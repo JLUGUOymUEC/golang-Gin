@@ -1,0 +1,69 @@
+gin-demo/               # 项目根目录
+│
+├── cmd/                        # 各服务的启动入口
+│   ├── gateway/                # API 网关服务
+│   │   └── main.go
+│   ├── user-service/           # 用户微服务
+│   │   └── main.go
+│   └── order-service/          # 订单微服务（示例）
+│       └── main.go
+│
+├── internal/                   # 私有代码（各服务独立）
+│   ├── gateway/                # 网关模块
+│   │   ├── handler/            # HTTP 处理层
+│   │   ├── middleware/         # 中间件（鉴权、日志、限流）
+│   │   ├── routes/             # 路由注册
+│   │   └── rpc/                # gRPC 客户端调用封装
+│   ├── user/                   # 用户服务模块
+│   │   ├── handler/            # gRPC 处理层
+│   │   ├── service/            # 业务逻辑层
+│   │   └── repository/         # 数据访问层
+│   │       ├── dao/            # 数据库操作
+│   │       └── model/          # 数据模型
+│   └── order/                  # 订单服务模块
+│       └── ...
+│
+├── pkg/                        # 可复用的公共库
+│   ├── config/                 # 配置管理
+│   ├── discovery/              # 服务注册与发现（etcd/consul）
+│   ├── errors/                 # 统一错误码
+│   ├── logger/                 # 日志封装
+│   ├── response/               # 统一响应格式
+│   └── utils/                  # 工具函数
+│
+├── api/                        # API 定义（Proto 文件）
+│   ├── user/
+│   │   └── user.proto
+│   ├── order/
+│   │   └── order.proto
+│   └── pb/                     # 生成的 gRPC 代码
+│       ├── user/
+│       └── order/
+│
+├── configs/                    # 配置文件
+│   ├── config.yaml
+│   ├── gateway.yaml
+│   ├── user-service.yaml
+│   └── order-service.yaml
+│
+├── scripts/                    # 构建/部署脚本
+│   ├── build.sh
+│   ├── proto-gen.sh            # proto 生成脚本
+│   └── docker-compose.yaml
+│
+├── deployments/                # 部署相关
+│   └── kubernetes/
+│
+├── go.mod
+├── go.sum
+└── Makefile                    # 统一构建命令
+
+
+
+protoc --proto_path=api \
+       --go_out=api/pb --go_opt=paths=source_relative \
+       --go-grpc_out=api/pb --go-grpc_opt=paths=source_relative \
+       api/user/user.proto
+用source_relative可以保持目录结构
+
+--go_out=api/pb --go_opt=paths=source_relative
