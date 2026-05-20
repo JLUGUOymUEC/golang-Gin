@@ -3,11 +3,14 @@ package repository
 import (
 	"context"
 	"fmt"
-	
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+
 	"gin-demo/internal/user/model"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 )
 
 type DynamoUserRepository struct {
@@ -39,22 +42,21 @@ func NewDynamoUserRepository(ctx context.Context) (*DynamoUserRepository, error)
 	}, nil
 }
 
-
-func (repo *DynamoUserRepository)CreateUser(ctx context.Context, user *model.User) error {
-	if err := user.Validate();err != nil{
+func (repo *DynamoUserRepository) CreateUser(ctx context.Context, user *model.User) error {
+	if err := user.Validate(); err != nil {
 		return err
 	}
 	user.BeforeCreate()
 	//将User结构体转换为DynamoDB项
 	item, err := attributevalue.MarshalMap(user)
 	if err != nil {
-		return fmt.Errorf("Failed to marshal user: " + err.Error())	
+		return fmt.Errorf("Failed to marshal user: " + err.Error())
 	}
 	//将项写入DynamoDB表
-	_, err = repo.client.PutItem(ctx , 
+	_, err = repo.client.PutItem(ctx,
 		&dynamodb.PutItemInput{
 			TableName: &repo.tableName,
-			Item: item,
+			Item:      item,
 		})
 	if err != nil {
 		return fmt.Errorf("Failed to put item: " + err.Error())
@@ -62,4 +64,13 @@ func (repo *DynamoUserRepository)CreateUser(ctx context.Context, user *model.Use
 	return nil
 }
 
-func (repo *DynamoUserRepository) GetUserByID(ctx context
+func (repo *DynamoUserRepository) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
+	userInfo, err := repo.client.Query(
+		ctx,
+		&dynamodb.QueryInput{
+			TableName:              &repo.tableName,
+			KeyConditionExpression: aws.String("user_id= :userId "),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":userId": &types.AttributeValueMemberS{Value: userID},
+			}})
+}
