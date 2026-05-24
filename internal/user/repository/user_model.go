@@ -1,25 +1,21 @@
 package repository
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/google/uuid"
 )
 
-//dyanamodbav标签用于aws-sdk-go-v2的dynamodbav包进行结构体与DynamoDB项之间的映射
+// dyanamodbav标签用于aws-sdk-go-v2的dynamodbav包进行结构体与DynamoDB项之间的映射
 type User struct {
-	UserID string `dynamodbav:"user_id"`
-	Username string `dynamodbav:"username"`
-	Password string `dynamodbav:"password"`
-	Email string `dynamodbav:"email"`
-	CreatedAt int64 `dynamodbav:"created_at"`
-	UpdatedAt int64 `dynamodbav:"updated_at"`
+	UserID    string `dynamodbav:"user_id"`
+	Username  string `dynamodbav:"username"`
+	Password  string `dynamodbav:"password"`
+	Email     string `dynamodbav:"email"`
+	CreatedAt int64  `dynamodbav:"created_at"`
+	UpdatedAt int64  `dynamodbav:"updated_at"`
 }
-
 
 func (user *User) Validate() error {
 	if user.Username == "" {
@@ -39,5 +35,5 @@ func (user *User) BeforeCreate() {
 	now := time.Now().Unix()
 	user.CreatedAt = now
 	user.UpdatedAt = now
-	user.UserID = uuid.New().string()s
+	user.UserID = uuid.New().String()
 }

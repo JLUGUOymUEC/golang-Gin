@@ -1,63 +1,105 @@
-gin-demo/               # 项目根目录
-│
-├── cmd/                        # 各服务的启动入口
-│   ├── gateway/                # API 网关服务
+gin-demo/
+├── cmd/
+│   ├── idp-gateway/           # IDP API 网关（改为 Gin）
 │   │   └── main.go
-│   ├── user-service/           # 用户微服务
+│   ├── user-service/          # 用户微服务（保留）
 │   │   └── main.go
-│   └── order-service/          # 订单微服务（示例）
+│   └── auth-service/          # 新增：认证授权服务
 │       └── main.go
 │
-├── internal/                   # 私有代码（各服务独立）
-│   ├── gateway/                # 网关模块
-│   │   ├── handler/            # HTTP 处理层
-│   │   ├── middleware/         # 中间件（鉴权、日志、限流）
-│   │   ├── routes/             # 路由注册
-│   │   └── rpc/                # gRPC 客户端调用封装
-│   ├── user/                   # 用户服务模块
-│   │   ├── handler/            # gRPC 处理层
-│   │   ├── service/            # 业务逻辑层
-│   │   └── repository/         # 数据访问层
-│   │       ├── dao/            # 数据库操作
-│   │       └── model/          # 数据模型
-│   └── order/                  # 订单服务模块
-│       └── ...
+├── internal/
+│   ├── gateway/               # 改为 IDP 网关
+│   │   ├── handler/           
+│   │   │   ├── auth_handler.go    # OAuth2/OIDC 端点
+│   │   │   ├── user_handler.go
+│   │   │   ├── token_handler.go
+│   │   │   └── admin_handler.go
+│   │   ├── middleware/        
+│   │   │   ├── cors.go
+│   │   │   ├── auth.go            # JWT 验证
+│   │   │   ├── rate_limit.go
+│   │   │   └── audit_log.go       # 审计日志
+│   │   ├── routes/            
+│   │   │   └── routes.go
+│   │   └── dto/               # 数据传输对象
+│   │       ├── request.go
+│   │       └── response.go
+│   │
+│   ├── auth/                  # 认证服务模块（新增）
+│   │   ├── handler/           # gRPC 处理层
+│   │   │   └── auth_grpc.go
+│   │   ├── service/           
+│   │   │   ├── oauth2.go          # OAuth2 逻辑
+│   │   │   ├── oidc.go            # OIDC 逻辑
+│   │   │   ├── token_service.go
+│   │   │   └── mfa_service.go     # MFA 支持
+│   │   └── repository/        
+│   │       ├── dao/          
+│   │       │   ├── client_dao.go      # OAuth2 客户端
+│   │       │   ├── token_dao.go       # Token 存储
+│   │       │   ├── session_dao.go     # Session 存储
+│   │       │   └── auth_code_dao.go   # 授权码
+│   │       └── model/         
+│   │           ├── client.go
+│   │           ├── token.go
+│   │           ├── session.go
+│   │           └── auth_code.go
+│   │
+│   └── user/                  # 用户服务模块（保留并扩展）
+│       ├── handler/           
+│       │   └── user_grpc.go
+│       ├── service/           
+│       │   ├── user_service.go
+│       │   ├── password_service.go   # 密码策略
+│       │   └── account_service.go    # 账号管理
+│       └── repository/        
+│           ├── dao/          
+│           │   ├── dynamodb.go       # 保留原有
+│           │   ├── user_model.go       # 新增RBAC
+│           │   └── user_repository.go      # 用户组
+│           └── model/         
+│               ├── user.go
+│               ├── role.go
+│               └── group.go
 │
-├── pkg/                        # 可复用的公共库
-│   ├── config/                 # 配置管理
-│   ├── discovery/              # 服务注册与发现（etcd/consul）
-│   ├── errors/                 # 统一错误码
-│   ├── logger/                 # 日志封装
-│   ├── response/               # 统一响应格式
-│   └── utils/                  # 工具函数
-│
-├── api/                        # API 定义（Proto 文件）
+├── api/                        # Proto 文件
+│   ├── auth/
+│   │   └── auth.proto          # OAuth2/OIDC 服务定义
 │   ├── user/
 │   │   └── user.proto
-│   ├── order/
-│   │   └── order.proto
-│   └── pb/                     # 生成的 gRPC 代码
-│       ├── user/
-│       └── order/
+│   └── pb/                     # 生成的代码
 │
-├── configs/                    # 配置文件
+├── pkg/                        
+│   ├── idp/                    # IDP 核心包（新增）
+│   │   ├── oauth2/
+│   │   │   ├── server.go
+│   │   │   ├── grant_types.go      # 各类 grant 实现
+│   │   │   └── validator.go
+│   │   ├── oidc/
+│   │   │   ├── discovery.go        # .well-known/openid-configuration
+│   │   │   ├── jwks.go            # JWKS 端点
+│   │   │   └── claims.go
+│   │   └── mfa/
+│   │       ├── totp.go
+│   │       └── sms.go
+│   ├── jwt/                    # JWT 工具（新增）
+│   │   └── manager.go
+│   ├── crypto/                 # 加密工具（新增）
+│   │   ├── password.go
+│   │   └── random.go
+│   └── ...（保留原有）
+│
+├── configs/                    
 │   ├── config.yaml
-│   ├── gateway.yaml
-│   ├── user-service.yaml
-│   └── order-service.yaml
+│   ├── idp-gateway.yaml        # IDP 网关配置
+│   ├── auth-service.yaml       # 认证服务配置
+│   └── user-service.yaml
 │
-├── scripts/                    # 构建/部署脚本
-│   ├── build.sh
-│   ├── proto-gen.sh            # proto 生成脚本
-│   └── docker-compose.yaml
-│
-├── deployments/                # 部署相关
-│   └── kubernetes/
-│
-├── go.mod
-├── go.sum
-└── Makefile                    # 统一构建命令
-
+└── scripts/
+    ├── build.sh
+    ├── proto-gen.sh
+    ├── init_db.sh               # 初始化 DynamoDB 表
+    └── docker-compose.yaml
 
 
 protoc --proto_path=api \
