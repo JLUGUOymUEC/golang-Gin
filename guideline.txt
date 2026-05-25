@@ -56,7 +56,12 @@ gin-demo/
 │           ├── dao/          
 │           │   ├── dynamodb.go       # 保留原有
 │           │   ├── user_model.go       # 新增RBAC
+│           │   └── auth_code_repository.go      # 
+│           │   └── session_repository.go      # 
+│           │   └── token_repository.go      # 
+│           │   └── client_repository.go      # 
 │           │   └── user_repository.go      # 用户组
+│           │   
 │           └── model/         
 │               ├── user.go
 │               ├── role.go
