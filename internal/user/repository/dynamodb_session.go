@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -39,8 +40,9 @@ func (repo *DynamoSessionRepository) CreateSession(ctx context.Context, session 
 	//将项写入DynamoDB表
 	_, err = repo.client.PutItem(ctx,
 		&dynamodb.PutItemInput{
-			TableName: aws.String(repo.tableName),
-			Item:      item,
+			TableName:           aws.String(repo.tableName),
+			Item:                item,
+			ConditionExpression: aws.String("attributes_not_exists(session_id)"),
 		})
 	if err != nil {
 		return fmt.Errorf("Failed to put item: %w ", err)
@@ -51,7 +53,6 @@ func (repo *DynamoSessionRepository) CreateSession(ctx context.Context, session 
 func (repo *DynamoSessionRepository) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	resp, err := repo.client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName:            aws.String(repo.tableName),
-		ProjectionExpression: aws.String("session_id, user_id, created_at, expired_at, revoked"),
 		Key: map[string]types.AttributeValue{
 			"session_id": &types.AttributeValueMemberS{Value: sessionID},
 		},
@@ -65,7 +66,10 @@ func (repo *DynamoSessionRepository) GetSession(ctx context.Context, sessionID s
 	}
 	var session Session
 	err = attributevalue.UnmarshalMap(resp.Item, &session)
-	return &session, err
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal session: %w", err)
+	}
+	return &session, nil
 }
 
 func (repo *DynamoSessionRepository) RefreshSession(ctx context.Context, sessionID string) error {
@@ -76,11 +80,32 @@ func (repo *DynamoSessionRepository) RefreshSession(ctx context.Context, session
 		Key: map[string]types.AttributeValue{
 			"session_id": &types.AttributeValueMemberS{Value: sessionID},
 		},
-		UpdateExpression: aws.String("SET expired_at = :expired_at" ),
+		UpdateExpression: aws.String("SET expired_at = :expired_at, revoked = :revoked"), // :占位符
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":expired_at": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiredAt)},
+			":revoked":    &types.AttributeValueMemberBOOL{Value: false},
+		},
+		ConditionExpression: aws.String("attribute_exists(session_id)"), //确保存在
+	},
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to refresh session: %w", err)
 	}
+
 	return nil
 }
 
 func (repo *DynamoSessionRepository) DeleteSession(ctx context.Context, sessionID string) error {
+	_, err := repo.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: &repo.tableName,
+		Key: map[string]types.AttributeValue{
+			"session_id": &types.AttributeValueMemberS{Value: sessionID},
+		},
+		ConditionExpression: aws.String("attribute_exists(session_id)"),
+	},
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to delete session: %w", err)
+	}
 	return nil
 }

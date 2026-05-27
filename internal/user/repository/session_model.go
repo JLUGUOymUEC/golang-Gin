@@ -2,6 +2,8 @@ package repository
 
 import (
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 type Session struct {
@@ -23,5 +25,6 @@ func (s *Session) Validate() error {
 	return nil
 }
 
-
-_,_ =
+func GenerateSessionID() string {
+	return fmt.Sprintf("sess_%s", uuid.New().String())
+}
