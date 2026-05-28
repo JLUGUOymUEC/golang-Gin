@@ -24,7 +24,11 @@ type SessionRepository interface {
 		ctx context.Context,
 		sessionID string,
 	) error
-}
 
+	RevokeSession(
+		ctx context.Context,
+		sessionID string,
+	) error
+}
 
 var _ SessionRepository = (*DynamoSessionRepository)(nil)

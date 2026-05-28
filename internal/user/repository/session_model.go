@@ -16,6 +16,8 @@ type Session struct {
 	ExpiredAt int64 `dynamodbav:"expired_at"`
 
 	Revoked bool `dynamodbav:"revoked"`
+
+	TTL int64 `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据
 }
 
 func (s *Session) Validate() error {

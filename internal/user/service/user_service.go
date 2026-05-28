@@ -41,7 +41,7 @@ func (service *UserService) GetUserByID(ctx context.Context, userID string) (*re
 		return nil, fmt.Errorf("Failed to get user by ID: %w ", err)
 	}
 	if user == nil {
-		return nil, fmt.Errorf("User with ID %s not found", userID)
+		return nil, nil
 	}
 	return user, nil
 }
@@ -52,7 +52,7 @@ func (service *UserService) GetUserByEmail(ctx context.Context, email string) (*
 		return nil, fmt.Errorf("Failed to get user by email: %w ", err)
 	}
 	if user == nil {
-		return nil, fmt.Errorf("User with email %s not found", email)
+		return nil, nil
 	}
 	return user, nil
 }

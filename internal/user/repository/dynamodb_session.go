@@ -42,7 +42,7 @@ func (repo *DynamoSessionRepository) CreateSession(ctx context.Context, session 
 		&dynamodb.PutItemInput{
 			TableName:           aws.String(repo.tableName),
 			Item:                item,
-			ConditionExpression: aws.String("attributes_not_exists(session_id)"),
+			ConditionExpression: aws.String("attribute_not_exists(session_id)"),
 		})
 	if err != nil {
 		return fmt.Errorf("Failed to put item: %w ", err)
@@ -52,7 +52,7 @@ func (repo *DynamoSessionRepository) CreateSession(ctx context.Context, session 
 
 func (repo *DynamoSessionRepository) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	resp, err := repo.client.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName:            aws.String(repo.tableName),
+		TableName: aws.String(repo.tableName),
 		Key: map[string]types.AttributeValue{
 			"session_id": &types.AttributeValueMemberS{Value: sessionID},
 		},
@@ -80,10 +80,11 @@ func (repo *DynamoSessionRepository) RefreshSession(ctx context.Context, session
 		Key: map[string]types.AttributeValue{
 			"session_id": &types.AttributeValueMemberS{Value: sessionID},
 		},
-		UpdateExpression: aws.String("SET expired_at = :expired_at, revoked = :revoked"), // :占位符
+		UpdateExpression: aws.String("SET expired_at = :expired_at, revoked = :revoked, ttl = :ttl"), // :占位符
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":expired_at": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiredAt)},
 			":revoked":    &types.AttributeValueMemberBOOL{Value: false},
+			":ttl":        &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiredAt)}, //更新TTL字段
 		},
 		ConditionExpression: aws.String("attribute_exists(session_id)"), //确保存在
 	},
@@ -106,6 +107,25 @@ func (repo *DynamoSessionRepository) DeleteSession(ctx context.Context, sessionI
 	)
 	if err != nil {
 		return fmt.Errorf("Failed to delete session: %w", err)
+	}
+	return nil
+}
+
+func (repo *DynamoSessionRepository) RevokeSession(ctx context.Context, sessionID string) error {
+	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &repo.tableName,
+		Key: map[string]types.AttributeValue{
+			"session_id": &types.AttributeValueMemberS{Value: sessionID},
+		},
+		UpdateExpression: aws.String("SET revoked = :revoked"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":revoked": &types.AttributeValueMemberBOOL{Value: true},
+		},
+		ConditionExpression: aws.String("attribute_exists(session_id)"),
+	},
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke session: %w", err)
 	}
 	return nil
 }

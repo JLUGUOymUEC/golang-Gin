@@ -18,6 +18,7 @@ func (service *SessionService) CreateSession(ctx context.Context, userID string)
 		CreatedAt: time.Now().Unix(),
 		ExpiredAt: time.Now().Add(24 * time.Hour).Unix(), //默认过期时间24小时,回来改成configurable,可以不停机更新
 		Revoked:   false,
+		TTL:       time.Now().Add(24 * time.Hour).Unix(), //设置TTL字段，自动删除过期数据
 	}
 	err := session.Validate()
 	if err != nil {
@@ -56,11 +57,17 @@ func (service *SessionService) RefreshSession(ctx context.Context, sessionID str
 }
 
 func (service *SessionService) RevokeSession(ctx context.Context, sessionID string) error {
-
+	err := service.repo.RevokeSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke session: %w ", err)
+	}
+	return nil
 }
 
-func (service *SessionService) DeleteExpiredSessions(ctx context.Context) error {
-
+func (service *SessionService) DeleteExpiredSessions(ctx context.Context, sessionID string) error {
+	err := service.repo.DeleteSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("Failed to delete session: %w ", err)
+	}
+	return nil
 }
-
-//加一个ttl自动删除超时数据
