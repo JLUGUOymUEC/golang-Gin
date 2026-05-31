@@ -9,19 +9,19 @@ import (
 
 // dyanamodbav标签用于aws-sdk-go-v2的dynamodbav包进行结构体与DynamoDB项之间的映射
 type User struct {
-	UserID    string `dynamodbav:"user_id"`
-	Username  string `dynamodbav:"username"`
-	Password  string `dynamodbav:"password"`
-	Email     string `dynamodbav:"email"`
-	CreatedAt int64  `dynamodbav:"created_at"`
-	UpdatedAt int64  `dynamodbav:"updated_at"`
+	UserID         string `dynamodbav:"user_id"`
+	Username       string `dynamodbav:"username"`
+	HashedPassword string `dynamodbav:"password"`
+	Email          string `dynamodbav:"email"`
+	CreatedAt      int64  `dynamodbav:"created_at"`
+	UpdatedAt      int64  `dynamodbav:"updated_at"`
 }
 
 func (user *User) Validate() error {
 	if user.Username == "" {
 		return fmt.Errorf("Username is required")
 	}
-	if user.Password == "" {
+	if user.HashedPassword == "" {
 		return fmt.Errorf("Password is required")
 	}
 	if user.Email == "" {

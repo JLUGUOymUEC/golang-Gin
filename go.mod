@@ -3,17 +3,18 @@ module gin-demo
 go 1.25.6
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.39
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.57.3
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
+	golang.org/x/crypto v0.50.0
 	google.golang.org/grpc v1.81.0
 	google.golang.org/protobuf v1.36.11
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.23 // indirect
@@ -52,7 +53,6 @@ require (
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.6.0 // indirect
 	golang.org/x/arch v0.26.0 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect

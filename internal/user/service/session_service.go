@@ -11,7 +11,7 @@ type SessionService struct {
 	repo repository.SessionRepository
 }
 
-func (service *SessionService) CreateSession(ctx context.Context, userID string) error {
+func (service *SessionService) CreateSession(ctx context.Context, userID string) (*repository.Session, error) {
 	session := &repository.Session{
 		SessionID: repository.GenerateSessionID(),
 		UserID:    userID,
@@ -22,13 +22,13 @@ func (service *SessionService) CreateSession(ctx context.Context, userID string)
 	}
 	err := session.Validate()
 	if err != nil {
-		return fmt.Errorf("Invalid session data: %w ", err)
+		return nil, fmt.Errorf("Invalid session data: %w ", err)
 	}
 	err = service.repo.CreateSession(ctx, session)
 	if err != nil {
-		return fmt.Errorf("Failed to create session: %w ", err)
+		return nil, fmt.Errorf("Failed to create session: %w ", err)
 	}
-	return nil
+	return session, nil
 }
 
 func (service *SessionService) ValidateSession(ctx context.Context, sessionID string) (*repository.Session, error) {

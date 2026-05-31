@@ -20,9 +20,9 @@ func (service *UserService) CreateUser(ctx context.Context, hashedPassword, emai
 	}
 
 	user := &repository.User{
-		Username: username,
-		Password: hashedPassword,
-		Email:    email,
+		Username:       username,
+		HashedPassword: hashedPassword,
+		Email:          email,
 	}
 	err = user.Validate()
 	if err != nil {

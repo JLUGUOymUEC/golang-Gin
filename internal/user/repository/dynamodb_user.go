@@ -71,7 +71,7 @@ func (repo *DynamoUserRepository) GetUserByID(ctx context.Context, userID string
 			TableName: aws.String(repo.tableName),
 
 			ProjectionExpression: aws.String(
-				"user_id, username, password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, created_at, updated_at",
 			),
 
 			Key: map[string]types.AttributeValue{
@@ -107,7 +107,7 @@ func (repo *DynamoUserRepository) GetUserByUsername(ctx context.Context, usernam
 			TableName:              aws.String(repo.tableName),
 			KeyConditionExpression: aws.String("username = :userName"),
 			ProjectionExpression: aws.String(
-				"user_id, username, password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, created_at, updated_at",
 			),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":userName": &types.AttributeValueMemberS{
@@ -190,11 +190,11 @@ func (repo *DynamoUserRepository) UpdateUser(ctx context.Context, user *User) er
 		}
 		updates = append(updates, "username = :username")
 	}
-	if user.Password != "" {
-		values["password"] = &types.AttributeValueMemberS{
-			Value: user.Password,
+	if user.HashedPassword != "" {
+		values["hashed_password"] = &types.AttributeValueMemberS{
+			Value: user.HashedPassword,
 		}
-		updates = append(updates, "password = :password")
+		updates = append(updates, "hashed_password = :hashed_password")
 	}
 	if user.Email != "" {
 		values["email"] = &types.AttributeValueMemberS{
@@ -250,7 +250,7 @@ func (repo *DynamoUserRepository) GetUserByEmail(ctx context.Context, email stri
 		&dynamodb.GetItemInput{
 			TableName: aws.String(repo.tableName),
 			ProjectionExpression: aws.String(
-				"user_id, username, password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, created_at, updated_at",
 			),
 			Key: map[string]types.AttributeValue{
 				"email": &types.AttributeValueMemberS{
