@@ -4,11 +4,56 @@ import (
 	"context"
 	"fmt"
 	"gin-demo/internal/user/repository"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// type AuthService interface {
+//     // 授权码流程
+//     CreateAuthCode(ctx context.Context, userID, redirectURI string) (*AuthorizeToken, error)
+
+//     // Token 操作
+//     ValidateToken(ctx context.Context, tokenString string) (*TokenClaims, error)
+//     RefreshToken(ctx context.Context, refreshToken string) (*TokenResponse, error)
+//     RevokeToken(ctx context.Context, tokenString string) error
+// }
 
 type AuthService struct {
 	userRepo      repository.UserRepository
 	sessionServce *SessionService
+	authTokenRepo repository.AuthTokenRepository
+}
+
+type TokenClaims struct {
+	UserID   string
+	Email    string
+	Username string
+}
+
+func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirectURI string) (*repository.AuthorizeToken, error) {
+	authToken := &repository.AuthorizeToken{
+		UserID:      userID,
+		RedirectURI: redirectURI,
+		Revoked:     false,
+	}
+	authToken.BeforeCreate()
+	if err := authToken.Validate(); err != nil {
+		return nil, fmt.Errorf("Invalid auth code data: %w ", err)
+	}
+	err := service.authTokenRepo.CreateToken(ctx, authToken)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create auth code: %w ", err)
+	}
+	return authToken, nil //handler里要把token转为字符串返回给客户端
+}
+
+func (service *AuthService) ValidateToken(ctx context.Context, tokenString string) (*TokenClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return s.secret, nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("Invalid token: %w ", err)
+	}
 }
 
 func (service *AuthService) Login(ctx context.Context, loginID string, password string) (*repository.Session, error) {

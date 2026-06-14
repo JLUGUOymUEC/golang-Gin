@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -68,4 +69,62 @@ func (repo *DynamoAccessTokenRepository) GetTokenByID(ctx context.Context, token
 		return nil, fmt.Errorf("Failed to unmarshal token: %w ", err)
 	}
 	return &accessToken, nil
+}
+
+func (repo *DynamoAccessTokenRepository) GetTokensByUserID(ctx context.Context, userID string) (*AccessToken, error) {
+	resp, err := repo.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(repo.tableName),
+		Key: map[string]types.AttributeValue{
+			"user_id": &types.AttributeValueMemberS{Value: userID},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get items: %w ", err)
+	}
+	if resp.Item == nil {
+		return nil, fmt.Errorf("Access Tokens not found for user_id: %s", userID)
+	}
+	var accessToken AccessToken
+	err = attributevalue.UnmarshalMap(resp.Item, &accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal tokens: %w ", err)
+	}
+	return &accessToken, nil
+}
+
+func (repo *DynamoAccessTokenRepository) RotateToken(ctx context.Context, tokenID string) error {
+	nowAt := time.Now().Unix()
+	expiredAt := nowAt + 30*24*3600
+
+	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(repo.tableName),
+		Key: map[string]types.AttributeValue{
+			"access_token_id": &types.AttributeValueMemberS{Value: tokenID},
+		},
+		UpdateExpression: aws.String("SET expired_at = :expiredAt"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":expiredAt": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiredAt)},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("Failed to update item: %w ", err)
+	}
+	return nil
+}
+
+func (repo *DynamoAccessTokenRepository) RevokeToken(ctx context.Context, tokenID string) error {
+	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(repo.tableName),
+		Key: map[string]types.AttributeValue{
+			"access_token_id": &types.AttributeValueMemberS{Value: tokenID},
+		},
+		UpdateExpression: aws.String("Set revoked = :revoked"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":revoked": &types.AttributeValueMemberBOOL{Value: true},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("Failed to revoke token: %w ", err)
+	}
+	return nil
 }

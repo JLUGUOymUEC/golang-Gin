@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -103,7 +102,7 @@ func (repo *DynamoAuthTokenRepository) RevokeToken(ctx context.Context, tokenID 
 		Key: map[string]types.AttributeValue{
 			"auth_token_id": &types.AttributeValueMemberS{Value: tokenID},
 		},
-		UpdateExpression: aws.String("SET revoke = :revoked"),
+		UpdateExpression: aws.String("SET revoked = :revoked"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":revoked": &types.AttributeValueMemberBOOL{Value: true},
 		},
@@ -114,25 +113,3 @@ func (repo *DynamoAuthTokenRepository) RevokeToken(ctx context.Context, tokenID 
 	}
 	return nil
 }
-
-// func (repo *DynamoAuthTokenRepository) RotateToken(ctx context.Context, tokenID string) error {
-// 	nowAt := time.Now().Unix()
-// 	ttl := nowAt + 5*60
-// 	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-// 		TableName: aws.String(repo.tableName),
-// 		Key: map[string]types.AttributeValue{
-// 			"auth_token_id": &types.AttributeValueMemberS{Value: tokenID},
-// 		},
-// 		UpdateExpression: aws.String("SET created_at = :created_at, revoked = :revoked, ttl = :ttl"),
-// 		ExpressionAttributeValues: map[string]types.AttributeValue{
-// 			":created_at": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", nowAt)},
-// 			":revoked":    &types.AttributeValueMemberBOOL{Value: false},
-// 			"ttl":         &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", ttl)},
-// 		},
-// 		ConditionExpression: aws.String("attribute_exists(auth_token_id)"),
-// 	})
-// 	if err != nil {
-// 		return fmt.Errorf("Failed to refresh auth_token")
-// 	}
-// 	return nil
-// }
