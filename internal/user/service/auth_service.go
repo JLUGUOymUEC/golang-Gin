@@ -47,14 +47,23 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirec
 	return authToken, nil //handler里要把token转为字符串返回给客户端
 }
 
-func (service *AuthService) ValidateToken(ctx context.Context, tokenString string) (*TokenClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return s.secret, nil
-	})
-	if err != nil || !token.Valid {
-		return nil, fmt.Errorf("Invalid token: %w ", err)
-	}
+
+func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string) (*repository.AccessToken, error) {
+
 }
+
+func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*TokenClaims, error) {
+
+}
+
+func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (*repository.AccessToken, error) {
+
+}
+
+func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken string) error {
+	
+}
+
 
 func (service *AuthService) Login(ctx context.Context, loginID string, password string) (*repository.Session, error) {
 	user, err := service.userRepo.GetUserByEmail(ctx, loginID)

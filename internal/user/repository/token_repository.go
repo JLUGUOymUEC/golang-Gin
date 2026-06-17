@@ -2,8 +2,6 @@ package repository
 
 import (
 	"context"
-
-	"github.com/google/uuid"
 )
 
 // 方法接口
@@ -19,6 +17,13 @@ type AccessTokenRepository interface {
 	GetTokenByID(ctx context.Context, tokenID string) (*AccessToken, error)
 	GetTokensByUserID(ctx context.Context, userID string) (*AccessToken, error)
 	RotateToken(ctx context.Context, tokenID string) error
+	RevokeToken(ctx context.Context, tokenID string) error
+}
+
+type RefreshTokenRepository interface {
+	CreateToken(ctx context.Context, token *RefreshToken) error
+	GetTokenByID(ctx context.Context, tokenID string) (*RefreshToken, error)
+	RotateToken(ctx context.Context, tokenID string) (*RefreshToken, error)
 	RevokeToken(ctx context.Context, tokenID string) error
 }
 

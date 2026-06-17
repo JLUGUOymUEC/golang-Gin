@@ -24,6 +24,11 @@ type AccessToken struct {
 	ttl           int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 24小时
 }
 
+type RefreshToken struct {
+	RefreshTokenID string `dynamodbav:"refresh_token_id"`
+	UserID         string `dynamodbav:"user_id"`
+}
+
 func (t *AuthorizeToken) Validate() error {
 	if t.UserID == "" {
 		return fmt.Errorf("UserID is required")
