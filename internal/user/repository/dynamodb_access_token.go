@@ -94,16 +94,16 @@ func (repo *DynamoAccessTokenRepository) GetTokensByUserID(ctx context.Context, 
 
 func (repo *DynamoAccessTokenRepository) RotateToken(ctx context.Context, tokenID string) error {
 	nowAt := time.Now().Unix()
-	expiredAt := nowAt + 30*24*3600
+	ttl := nowAt + 30*24*3600
 
 	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(repo.tableName),
 		Key: map[string]types.AttributeValue{
 			"access_token_id": &types.AttributeValueMemberS{Value: tokenID},
 		},
-		UpdateExpression: aws.String("SET expired_at = :expiredAt"),
+		UpdateExpression: aws.String("SET ttl = :ttl"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":expiredAt": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", expiredAt)},
+			":ttl": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", ttl)},
 		},
 	})
 	if err != nil {

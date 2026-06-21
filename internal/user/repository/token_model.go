@@ -27,6 +27,9 @@ type AccessToken struct {
 type RefreshToken struct {
 	RefreshTokenID string `dynamodbav:"refresh_token_id"`
 	UserID         string `dynamodbav:"user_id"`
+	CreatedAt      int64  `dynamodbav:"created_at"`
+	Revoked        bool   `dynamodbav:"revoked"`
+	ttl            int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 7天
 }
 
 func (t *AuthorizeToken) Validate() error {
@@ -37,6 +40,13 @@ func (t *AuthorizeToken) Validate() error {
 }
 
 func (t *AccessToken) Validate() error {
+	if t.UserID == "" {
+		return fmt.Errorf("UserID is required")
+	}
+	return nil
+}
+
+func (t *RefreshToken) Validate() error {
 	if t.UserID == "" {
 		return fmt.Errorf("UserID is required")
 	}
@@ -56,5 +66,13 @@ func (t *AccessToken) BeforeCreate() {
 	t.CreatedAt = now
 	t.ttl = now + 24*60*60 // 24小时后过期
 	t.AccessTokenID = uuid.New().String()
+	t.Revoked = false
+}
+
+func (t *RefreshToken) BeforeCreate() {
+	now := time.Now().Unix()
+	t.CreatedAt = now
+	t.ttl = now + 5*60 // 5分钟后过期
+	t.RefreshTokenID = uuid.New().String()
 	t.Revoked = false
 }
