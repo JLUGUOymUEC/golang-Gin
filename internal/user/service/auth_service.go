@@ -28,6 +28,7 @@ type AuthService struct {
 }
 
 type TokenClaims struct {
+	TokenID              string
 	UserID               string
 	Email                string
 	Username             string
@@ -79,10 +80,9 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*TokenClaims, error) {
 	//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMTIzIiwic2Vzc2lvbl9pZCI6Inh4eCIsImV4cCI6MTY5OTk5OTk5OX0.signature
 	// ↑ Header                            ↑ Payload (claims)                  ↑ Signature
-	claims := &TokenClaims{}
 	// 使用·jwt库解析和验证Token
 	token, err := jwt.ParseWithClaims(accessToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return service.secret, nil
+		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("Invalid token: %w ", err)
@@ -90,15 +90,54 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 	if claims, ok := token.Claims.(*TokenClaims); ok {
 		return claims, nil
 	}
-	return claims, nil
+	return nil, fmt.Errorf("Failed to valid token: %w ", err)
 }
 
 func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (*repository.AccessToken, error) {
 
+	accessToken := &repository.AccessToken{}
+	token, err := jwt.ParseWithClaims(refreshToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(service.secret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("Invalid refresh token: %w ", err)
+	}
+
+	if claims, ok := token.Claims.(*TokenClaims); ok {
+		// 验证refresh token是否有效
+		refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.TokenID)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to get refresh token: %w ", err)
+		}
+		if refreshTokenRecord.Validate() != nil || refreshTokenRecord.Revoked {
+			return nil, fmt.Errorf("Refresh token is invalid or revoked")
+		}
+		// 创建新的access token
+		accessToken.UserID = claims.UserID
+		accessToken.BeforeCreate()
+		if err := accessToken.Validate(); err != nil {
+			return nil, fmt.Errorf("Invalid access token data: %w ", err)
+		}
+		if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
+			return nil, fmt.Errorf("Failed to create access token: %w ", err)
+		}
+
+	}
+	return accessToken, nil
 }
 
 func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken string) error {
 
+	token, err := jwt.ParseWithClaims(accessToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(service.secret), nil
+	})
+	if err != nil || !token.Valid {
+		return fmt.Errorf("Invalid token: %w ", err)
+	}
+	if claims, ok := token.Claims.(*TokenClaims); ok {
+		return service.accessTokenRepo.RevokeToken(ctx, claims.TokenID)
+	}
+	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
 func (service *AuthService) Login(ctx context.Context, loginID string, password string) (*repository.Session, error) {
