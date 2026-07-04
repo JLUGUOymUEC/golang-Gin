@@ -20,7 +20,7 @@ import (
 
 type AuthService struct {
 	userRepo         repository.UserRepository
-	sessionServce    *SessionService
+	sessionService   *SessionService
 	authTokenRepo    repository.AuthTokenRepository
 	accessTokenRepo  repository.AccessTokenRepository
 	refreshTokenRepo repository.RefreshTokenRepository
@@ -33,6 +33,25 @@ type TokenClaims struct {
 	Email                string
 	Username             string
 	jwt.RegisteredClaims // 包含标准的JWT声明，如exp、iat等
+}
+
+func (service *AuthService) CreateRefreshToken(ctx context.Context, userID string) (*repository.RefreshToken, error) {
+	refreshToken := &repository.RefreshToken{
+		UserID:  userID,
+		Revoked: false,
+	}
+	refreshToken.BeforeCreate()
+	if err := refreshToken.Validate(); err != nil {
+		return nil, fmt.Errorf("Invalid refresh token data: %w ", err)
+	}
+	if err := service.refreshTokenRepo.CreateToken(ctx, refreshToken); err != nil {
+		return nil, fmt.Errorf("Failed to create refresh token: %w ", err)
+	}
+	return refreshToken, nil
+}
+
+func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshTokenID string) error {
+	return service.refreshTokenRepo.RevokeToken(ctx, refreshTokenID)
 }
 
 func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirectURI string) (*repository.AuthorizeToken, error) {
@@ -157,7 +176,7 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 	if !VerifyPassword(password, user.HashedPassword) {
 		return nil, fmt.Errorf("Invalid password for user with email %s", loginID)
 	}
-	session, err := service.sessionServce.CreateSession(ctx, user.UserID)
+	session, err := service.sessionService.CreateSession(ctx, user.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create session: %w ", err)
 	}
@@ -165,5 +184,35 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 }
 
 func (service *AuthService) Logout(ctx context.Context, sessionID string) error {
-	return service.sessionServce.RevokeSession(ctx, sessionID)
+	session, err := service.sessionService.ValidateSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("Failed to validate session: %w ", err)
+	}
+
+	accessToken, err := service.accessTokenRepo.GetTokensByUserID(ctx, session.UserID)
+	if err != nil {
+		return fmt.Errorf("Failed to get access tokens: %w ", err)
+	}
+
+	err = service.accessTokenRepo.RevokeToken(ctx, accessToken.AccessTokenID)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke access token: %w ", err)
+	}
+	authToken, err := service.authTokenRepo.GetTokensByUserID(ctx, session.UserID)
+	if err != nil {
+		return fmt.Errorf("Failed to get auth tokens: %w ", err)
+	}
+	err = service.authTokenRepo.RevokeToken(ctx, authToken.AuthTokenID)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke auth token: %w ", err)
+	}
+	err = service.sessionService.RevokeSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke session: %w ", err)
+	}
+	return nil
+}
+
+func (service *AuthService) GetSecretKey() string {
+	return service.secret
 }
