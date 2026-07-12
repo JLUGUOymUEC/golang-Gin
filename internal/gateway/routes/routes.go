@@ -1,13 +1,12 @@
 package routes
 
-
 import (
 	"gin-demo/internal/gateway/middleware"
-	"gin-demo/internal/user/service"
-	"github.com/gin-gonic/gin"
 	"gin-demo/internal/handler"
-)
+	"gin-demo/internal/user/service"
 
+	"github.com/gin-gonic/gin"
+)
 
 func RegisterRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authService *service.AuthService) {
 
@@ -22,7 +21,7 @@ func RegisterRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authSe
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.AuthMiddleware(authService))
 	{
-			protected.GET("/user/me", func(c *gin.Context) {
+		protected.GET("/user/me", func(c *gin.Context) {
 			userID, _ := c.Get("user_id")
 			c.JSON(200, gin.H{"user_id": userID})
 		})
