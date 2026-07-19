@@ -29,6 +29,11 @@ type SessionRepository interface {
 		ctx context.Context,
 		sessionID string,
 	) error
+
+	GetSessionIDsByUserID(
+		ctx context.Context,
+		userID string,
+	) ([]string, error)
 }
 
 var _ SessionRepository = (*DynamoSessionRepository)(nil)

@@ -129,3 +129,31 @@ func (repo *DynamoSessionRepository) RevokeSession(ctx context.Context, sessionI
 	}
 	return nil
 }
+
+func (repo *DynamoSessionRepository) GetSessionIDsByUserID(ctx context.Context, userID string) ([]string, error) {
+	resp, err := repo.client.Query(ctx, &dynamodb.QueryInput{
+		TableName:                 aws.String(repo.tableName),
+		IndexName:                 aws.String("user_id-index"), //  指定用哪个索引
+		KeyConditionExpression:    aws.String("user_id = :user_id"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":user_id": &types.AttributeValueMemberS{Value: userID}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to query session IDs by user ID: %w", err)
+	}
+	if resp.Count == 0 {
+		return []string{}, nil
+	}
+	sessionIDs := make([]string, len(resp.Items))
+	for i, item := range resp.Items {
+		sessionIDAttr, ok := item["session_id"]
+		if !ok {
+			continue // 或返回错误
+		}
+		sessionID, ok := sessionIDAttr.(*types.AttributeValueMemberS)
+		if !ok {
+			continue // 或返回错误
+		}
+		sessionIDs[i] = sessionID.Value
+	}
+	return sessionIDs, nil
+}

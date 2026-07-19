@@ -11,6 +11,8 @@ type SessionService struct {
 	repo repository.SessionRepository
 }
 
+
+
 func (service *SessionService) CreateSession(ctx context.Context, userID string) (*repository.Session, error) {
 	session := &repository.Session{
 		SessionID: repository.GenerateSessionID(),
@@ -70,4 +72,16 @@ func (service *SessionService) DeleteExpiredSessions(ctx context.Context, sessio
 		return fmt.Errorf("Failed to delete session: %w ", err)
 	}
 	return nil
+}
+
+
+func (service *SessionService) GetSessionIDsByUserID(ctx context.Context, userID string) ([]string, error) {
+	sessionIDs, err := service.repo.GetSessionIDsByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get session IDs by user ID: %w", err)
+	}
+	if len(sessionIDs) == 0 {
+		return []string{}, nil
+	}
+	return sessionIDs, nil
 }
