@@ -4,6 +4,7 @@ import (
 	"gin-demo/internal/user/repository"
 	"gin-demo/internal/user/service"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +12,9 @@ import (
 )
 
 type AuthHandler struct {
-	authService *service.AuthService
+	authService    *service.AuthService
+	accountService *service.AccountService
+	userService    *service.UserService
 }
 
 type AuthorizeTokenClaims struct {
@@ -52,9 +55,9 @@ func (h *AuthHandler) generateAccessToken(accessToken *repository.AccessToken) (
 		CreatedAt:     accessToken.CreatedAt,
 		Revoked:       accessToken.Revoked,
 		RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)), 
-            IssuedAt:  jwt.NewNumericDate(time.Now()),
-        },
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := tokenClaims.SignedString([]byte(h.authService.GetSecretKey()))
@@ -69,11 +72,11 @@ func (h *AuthHandler) generateRefreshToken(refreshToken *repository.RefreshToken
 		RefreshTokenID: refreshToken.RefreshTokenID,
 		UserID:         refreshToken.UserID,
 		CreatedAt:      refreshToken.CreatedAt,
-		Revoked:          refreshToken.Revoked,
+		Revoked:        refreshToken.Revoked,
 		RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)), 
-            IssuedAt:  jwt.NewNumericDate(time.Now()),
-        },
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := tokenClaims.SignedString([]byte(h.authService.GetSecretKey()))
@@ -91,9 +94,9 @@ func (h *AuthHandler) generateAuthToken(authToken *repository.AuthorizeToken) (s
 		Revoked:     authToken.Revoked,
 		RedirectURI: authToken.RedirectURI,
 		RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)), 
-            IssuedAt:  jwt.NewNumericDate(time.Now()),
-        },
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -103,7 +106,6 @@ func (h *AuthHandler) generateAuthToken(authToken *repository.AuthorizeToken) (s
 	}
 	return tokenString, nil
 }
-
 
 // POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -174,7 +176,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	accessTokenString ,err := h.generateAccessToken(accessToken)
+	accessTokenString, err := h.generateAccessToken(accessToken)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -249,4 +251,139 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
 
+}
+
+func (h *AuthHandler) verifyEmailFormat(email string) bool {
+	// 正则表达式验证邮箱格式
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
+}
+
+// POST /auth/register
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if ok := h.verifyEmailFormat(req.Email); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+	}
+	if ok := h.VerifyPasswordFormat(req.Password); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid password format"})
+	}
+	newUser := &repository.User{
+		Username: req.Username,
+		Email:    req.Email,
+	}
+	if err := h.accountService.Register(c.Request.Context(), newUser, req.Password); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user registered successfully"})
+	return
+}
+
+// POST /auth/get_profile
+func (h *AuthHandler) GetProfile(c *gin.Context) {
+	var req struct {
+		UserID string `json:"user_id" binding:"required"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	profile, err := h.accountService.GetProfile(c.Request.Context(), req.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// GIN会自己序列化
+	c.JSON(http.StatusOK, gin.H{"profile": profile})
+}
+
+// POST /auth/update_profile
+func (h *AuthHandler) UpdateProfile(c *gin.Context) {
+	var req struct {
+		UserID   string `json:"user_id" binding:"required"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	existedUser, err := h.userService.GetUserByID(c.Request.Context(), req.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if existedUser.Email == req.Email && existedUser.Username == req.Username {
+		c.JSON(http.StatusOK, gin.H{"message": "No changes detected"})
+		return
+	}
+	if req.Email != "" && req.Email != existedUser.Email {
+		if !h.verifyEmailFormat(req.Email) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+			return
+		}
+	}
+	updatedUser := &repository.User{
+		UserID:   req.UserID,
+		Username: req.Username,
+		Email:    req.Email,
+	}
+	if err = h.accountService.UpdateProfile(c.Request.Context(), req.UserID, updatedUser); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
+	return
+}
+
+func (h *AuthHandler) VerifyPasswordFormat(password string) bool {
+	// 密码规则：8-16位，必须包含大小写字母、数字和特殊字符
+	// 长度 8-16 位
+	if len(password) < 8 || len(password) > 16 {
+		return false
+	}
+
+	// 必须包含至少一个小写字母
+	hasLower := regexp.MustCompile(`[a-z]`).MatchString(password)
+	// 必须包含至少一个大写字母
+	hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(password)
+	// 必须包含至少一个数字
+	hasDigit := regexp.MustCompile(`[0-9]`).MatchString(password)
+	// 必须包含至少一个特殊字符（自定义允许的符号）
+	hasSpecial := regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]`).MatchString(password)
+
+	return hasLower && hasUpper && hasDigit && hasSpecial
+}
+
+// POST /auth/change_password
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	var req struct {
+		UserID      string `json:"user_id" binding:"required"`
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.VerifyPasswordFormat(req.NewPassword) || req.NewPassword == req.OldPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password Format Error"})
+		return
+	}
+	if err := h.accountService.ChangePassword(c.Request.Context(), req.UserID, req.OldPassword, req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Change Password successfully"})
 }
