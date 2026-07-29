@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"gin-demo/internal/gateway/middleware"
 	"gin-demo/internal/user/repository"
 	"gin-demo/internal/user/service"
 	"net/http"
@@ -18,33 +19,34 @@ type AuthHandler struct {
 }
 
 type AuthorizeTokenClaims struct {
-	AuthTokenID string `dynamodbav:"auth_token_id"`
-	UserID      string `dynamodbav:"user_id"`
-	CreatedAt   int64  `dynamodbav:"created_at"`
-	Revoked     bool   `dynamodbav:"revoked"`
-	RedirectURI string `dynamodbav:"redirect_uri"`
+	AuthTokenID string `json:"auth_token_id"`
+	UserID      string `json:"user_id"`
+	CreatedAt   int64  `json:"created_at"`
+	Revoked     bool   `json:"revoked"`
+	RedirectURI string `json:"redirect_uri"`
 	jwt.RegisteredClaims
 }
 
 type AccessTokenClaims struct {
-	AccessTokenID string `dynamodbav:"access_token_id"`
-	UserID        string `dynamodbav:"user_id"`
-	CreatedAt     int64  `dynamodbav:"created_at"`
-	Revoked       bool   `dynamodbav:"revoked"`
+	AccessTokenID string `json:"access_token_id"`
+	UserID        string `json:"user_id"`
+	CreatedAt     int64  `json:"created_at"`
+	Revoked       bool   `json:"revoked"`
 	jwt.RegisteredClaims
 }
 
 type RefreshTokenClaims struct {
-	RefreshTokenID string `dynamodbav:"refresh_token_id"`
-	UserID         string `dynamodbav:"user_id"`
-	CreatedAt      int64  `dynamodbav:"created_at"`
-	Revoked        bool   `dynamodbav:"revoked"`
+	RefreshTokenID string `json:"refresh_token_id"`
+	UserID         string `json:"user_id"`
+	CreatedAt      int64  `json:"created_at"`
+	Revoked        bool   `json:"revoked"`
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(authService *service.AuthService) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, accoutService *service.AccountService) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authService:    authService,
+		accountService: accoutService,
 	}
 }
 
@@ -249,8 +251,9 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 			return
 		}
 	}
+	c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
-
+	return 
 }
 
 func (h *AuthHandler) verifyEmailFormat(email string) bool {
@@ -272,9 +275,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	if ok := h.verifyEmailFormat(req.Email); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		return
 	}
 	if ok := h.VerifyPasswordFormat(req.Password); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid password format"})
+		return
 	}
 	newUser := &repository.User{
 		Username: req.Username,
@@ -290,15 +295,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 // POST /auth/get_profile
 func (h *AuthHandler) GetProfile(c *gin.Context) {
-	var req struct {
-		UserID string `json:"user_id" binding:"required"`
-	}
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	user_id, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't get userid from middleware"})
 		return
 	}
-
-	profile, err := h.accountService.GetProfile(c.Request.Context(), req.UserID)
+	profile, err := h.accountService.GetProfile(c.Request.Context(), user_id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -310,7 +312,6 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 // POST /auth/update_profile
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	var req struct {
-		UserID   string `json:"user_id" binding:"required"`
 		Username string `json:"username"`
 		Email    string `json:"email"`
 	}
@@ -318,8 +319,13 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	user_id, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't get userid from middleware"})
+		return
+	}
 
-	existedUser, err := h.userService.GetUserByID(c.Request.Context(), req.UserID)
+	existedUser, err := h.userService.GetUserByID(c.Request.Context(), user_id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -335,11 +341,11 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		}
 	}
 	updatedUser := &repository.User{
-		UserID:   req.UserID,
+		UserID:   user_id,
 		Username: req.Username,
 		Email:    req.Email,
 	}
-	if err = h.accountService.UpdateProfile(c.Request.Context(), req.UserID, updatedUser); err != nil {
+	if err = h.accountService.UpdateProfile(c.Request.Context(), user_id, updatedUser); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -369,21 +375,27 @@ func (h *AuthHandler) VerifyPasswordFormat(password string) bool {
 // POST /auth/change_password
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req struct {
-		UserID      string `json:"user_id" binding:"required"`
 		OldPassword string `json:"old_password" binding:"required"`
 		NewPassword string `json:"new_password" binding:"required"`
+	}
+	user_id, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't get userid from middleware"})
+		return
 	}
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if h.VerifyPasswordFormat(req.NewPassword) || req.NewPassword == req.OldPassword {
+	if !h.VerifyPasswordFormat(req.NewPassword) || req.NewPassword == req.OldPassword {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Password Format Error"})
 		return
 	}
-	if err := h.accountService.ChangePassword(c.Request.Context(), req.UserID, req.OldPassword, req.NewPassword); err != nil {
+	if err := h.accountService.ChangePassword(c.Request.Context(), user_id, req.OldPassword, req.NewPassword); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Change Password successfully"})
+	return
 }

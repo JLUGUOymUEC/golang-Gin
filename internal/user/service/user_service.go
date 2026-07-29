@@ -69,10 +69,11 @@ func (service *UserService) GetUserByUsername(ctx context.Context, username stri
 }
 
 func (service *UserService) ListUsers(ctx context.Context, limit int32, lastToken string) ([]*repository.User, string, error) {
-	users, next_token, err := service.repo.ListUsersWithPagination(ctx, limit, lastToken)
 	if limit <= 0 || limit > 100 {
 		limit = 20 // 默认每页20条，最大100条
 	}
+	users, next_token, err := service.repo.ListUsersWithPagination(ctx, limit, lastToken)
+
 	if err != nil {
 		return nil, "", fmt.Errorf("Failed to list users: %w ", err)
 	}
