@@ -1,117 +1,89 @@
-gin-demo/
+# IDP 项目架构指南
+
+> 标记说明：`[已实现]` 表示已有代码；`[草稿]` 表示已有文件但尚未接入运行链路；`[规划]` 表示目标目录或能力。
+
+```text
+golang-Gin/
+├── main.go                              # [已实现] Gin 示例入口：GET /ping
 ├── cmd/
-│   ├── idp-gateway/           # IDP API 网关（改为 Gin）
-│   │   └── main.go
-│   ├── user-service/          # 用户微服务（保留）
-│   │   └── main.go
-│   └── auth-service/          # 新增：认证授权服务
-│       └── main.go
+│   ├── idp-gateway/
+│   │   └── main.go                      # [草稿] IDP API 网关入口
+│   ├── user-service/
+│   │   └── main.go                      # [已实现] User gRPC 服务，监听 :50051
+│   └── auth-service/
+│       └── main.go                      # [草稿] 独立认证授权服务入口
 │
 ├── internal/
-│   ├── gateway/               # 改为 IDP 网关
-│   │   ├── handler/           
-│   │   │   ├── auth_handler.go    # OAuth2/OIDC 端点
-│   │   │   ├── user_handler.go
-│   │   │   ├── token_handler.go
-│   │   │   └── admin_handler.go
-│   │   ├── middleware/        
-│   │   │   ├── cors.go
-│   │   │   ├── auth.go            # JWT 验证
-│   │   │   ├── rate_limit.go
-│   │   │   └── audit_log.go       # 审计日志
-│   │   ├── routes/            
-│   │   │   └── routes.go
-│   │   └── dto/               # 数据传输对象
-│   │       ├── request.go
-│   │       └── response.go
+│   ├── gateway/                         # [草稿] 对外 IDP 网关
+│   │   ├── main.go
+│   │   ├── routes/
+│   │   │   └── auth_routes.go           # 登录、登出、令牌、用户资料路由
+│   │   └── middleware/
+│   │       ├── auth.go                  # JWT 验证
+│   │       ├── rate_limit.go
+│   │       └── cors.go                  # 待实现
 │   │
-│   ├── auth/                  # 认证服务模块（新增）
-│   │   ├── handler/           # gRPC 处理层
-│   │   │   └── auth_grpc.go
-│   │   ├── service/           
-│   │   │   ├── oauth2.go          # OAuth2 逻辑
-│   │   │   ├── oidc.go            # OIDC 逻辑
-│   │   │   ├── token_service.go
-│   │   │   └── mfa_service.go     # MFA 支持
-│   │   └── repository/        
-│   │       ├── dao/          
-│   │       │   ├── client_dao.go      # OAuth2 客户端
-│   │       │   ├── token_dao.go       # Token 存储
-│   │       │   ├── session_dao.go     # Session 存储
-│   │       │   └── auth_code_dao.go   # 授权码
-│   │       └── model/         
-│   │           ├── client.go
-│   │           ├── token.go
-│   │           ├── session.go
-│   │           └── auth_code.go
+│   ├── handler/                         # [草稿] Gin HTTP handler
+│   │   ├── auth_handler.go              # 登录、注册、令牌、资料
+│   │   └── user_handler.go
 │   │
-│   └── user/                  # 用户服务模块（保留并扩展）
-│       ├── handler/           
-│       │   └── user_grpc.go
-│       ├── service/           
-│       │   ├── user_service.go
-│       │   ├── password_service.go   # 密码策略
-│       │   └── account_service.go    # 账号管理
-│       └── repository/        
-│           ├── dao/          
-│           │   ├── dynamodb.go       # 保留原有
-│           │   ├── user_model.go       # 新增RBAC
-│           │   └── auth_code_repository.go      # 
-│           │   └── session_repository.go      # 
-│           │   └── token_repository.go      # 
-│           │   └── client_repository.go      # 
-│           │   └── user_repository.go      # 用户组
-│           │   
-│           └── model/         
-│               ├── user.go
-│               ├── role.go
-│               └── group.go
-
+│   ├── user/                            # [已实现] 用户与当前认证核心
+│   │   ├── main.go                      # 待实现
+│   │   ├── handler/
+│   │   │   └── user_grpc.go             # gRPC 请求分发
+│   │   ├── service/
+│   │   │   ├── user_service.go          # 用户查询与管理
+│   │   │   ├── account_service.go       # 注册、资料、修改密码
+│   │   │   ├── auth_service.go          # 登录、令牌、会话
+│   │   │   ├── session_service.go       # 会话管理
+│   │   │   └── credential_service.go    # bcrypt 密码处理
+│   │   └── repository/
+│   │       ├── user_repository.go       # 用户仓储接口
+│   │       ├── session_repository.go    # 会话仓储接口
+│   │       ├── token_repository.go      # 授权码、访问/刷新令牌接口
+│   │       ├── *_model.go               # 用户、会话、令牌模型
+│   │       └── dynamodb_*.go            # DynamoDB 实现
+│   │
+│   ├── auth/                            # [规划] OAuth2/OIDC 认证领域
+│   │   ├── handler/                     # auth gRPC 或 HTTP 编排层
+│   │   ├── service/                     # authorize、token、OIDC、MFA
+│   │   └── repository/                  # OAuth 客户端与授权码存储
+│   │
+│   └── order-service/                   # [草稿] 与 IDP 无直接关系的占位服务
 │
-├── api/                        # Proto 文件
-│   ├── auth/
-│   │   └── auth.proto          # OAuth2/OIDC 服务定义
+├── api/
 │   ├── user/
-│   │   └── user.proto
-│   └── pb/                     # 生成的代码
+│   │   └── user.proto                   # [已实现] UserService gRPC 契约
+│   └── pb/user/
+│       ├── user.pb.go                   # protobuf 生成代码
+│       └── user_grpc.pb.go              # gRPC 生成代码
 │
-├── pkg/                        
-│   ├── idp/                    # IDP 核心包（新增）
-│   │   ├── oauth2/
-│   │   │   ├── server.go
-│   │   │   ├── grant_types.go      # 各类 grant 实现
-│   │   │   └── validator.go
-│   │   ├── oidc/
-│   │   │   ├── discovery.go        # .well-known/openid-configuration
-│   │   │   ├── jwks.go            # JWKS 端点
-│   │   │   └── claims.go
-│   │   └── mfa/
-│   │       ├── totp.go
-│   │       └── sms.go
-│   ├── jwt/                    # JWT 工具（新增）
-│   │   └── manager.go
-│   ├── crypto/                 # 加密工具（新增）
-│   │   ├── password.go
-│   │   └── random.go
-│   └── ...（保留原有）
+├── pkg/                                 # [规划] 可复用的 IDP 基础包
+│   ├── idp/oauth2/                      # OAuth2 授权流程与校验
+│   ├── idp/oidc/                        # Discovery、JWKS、Claims
+│   ├── idp/mfa/                         # MFA
+│   ├── jwt/                             # JWT 签发和校验
+│   └── crypto/                          # 密码和随机数工具
 │
-├── configs/                    
-│   ├── config.yaml
-│   ├── idp-gateway.yaml        # IDP 网关配置
-│   ├── auth-service.yaml       # 认证服务配置
-│   └── user-service.yaml
-│
-└── scripts/
-    ├── build.sh
-    ├── proto-gen.sh
-    ├── init_db.sh               # 初始化 DynamoDB 表
-    └── docker-compose.yaml
+├── configs/                             # [草稿] 服务配置文件
+├── scripts/                             # 构建、proto 生成、Docker 脚本
+├── go.mod
+└── go.sum
+```
 
+## 目标调用关系
 
-protoc --proto_path=api \
-       --go_out=api/pb --go_opt=paths=source_relative \
-       --go-grpc_out=api/pb --go-grpc_opt=paths=source_relative \
-       api/user/user.proto
-用source_relative可以保持目录结构
+```text
+客户端
+  │ HTTP（OAuth2 / OIDC）
+  ▼
+IDP Gateway（Gin）
+  │
+  ├── 认证、令牌、会话 ──► Auth Service / internal/auth
+  └── 用户资料与凭据 ────► User Service（gRPC）
+                                   │
+                                   ▼
+                              DynamoDB
+```
 
---go_out=api/pb --go_opt=paths=source_relative
+当前真正可运行的服务只有 `cmd/user-service`；认证、令牌和 DynamoDB 的领域代码虽已开始编写，但尚未由服务入口完成依赖装配和调用。

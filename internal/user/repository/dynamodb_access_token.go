@@ -64,7 +64,7 @@ func (repo *DynamoAccessTokenRepository) GetTokenByID(ctx context.Context, token
 		return nil, fmt.Errorf("Access Token not found")
 	}
 	var accessToken AccessToken
-	err = attributevalue.UnmarshalMap(resp.Item, accessToken)
+	err = attributevalue.UnmarshalMap(resp.Item, &accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal token: %w ", err)
 	}
