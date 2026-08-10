@@ -1,6 +1,11 @@
 package repository
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type OAuthClient struct {
 	ClientID          string   `dynamodbav:"client_id"`
@@ -29,6 +34,35 @@ const (
 	ScopeProfile Scope = "profile"
 	ScopeEmail   Scope = "email"
 )
+
+func (client *OAuthClient) Validate() error {
+	if client.ClientID == "" {
+		return fmt.Errorf("ClientID is required")
+	}
+	if client.AppName == "" {
+		return fmt.Errorf("AppName is required")
+	}
+	if err := ValidateGrantTypes(client.AllowedGrantTypes); err != nil {
+		return fmt.Errorf("Invalid grant types: %w", err)
+	}
+	if err := ValidateGrantScopes(client.AllowedScopes); err != nil {
+		return fmt.Errorf("Invalid scopes: %w", err)
+	}
+	return nil
+}
+
+func (client *OAuthClient) generateClientID() {
+	client.ClientID = uuid.New().String()
+}
+
+func (client *OAuthClient) BeforeCreate() {
+	now := time.Now().Unix()
+	client.generateClientID()
+	client.CreatedAt = now
+	client.UpdatedAt = now
+	client.IsActive = true
+
+}
 
 func DefaultGrantTypes() []string {
 	return []string{

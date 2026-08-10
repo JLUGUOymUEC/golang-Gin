@@ -39,6 +39,16 @@ func (service *AuthService) GetSecretKey() string {
 	return service.secret
 }
 
+func NewAuthService(userRepo repository.UserRepository, sessionService *SessionService, authTokenRepo repository.AuthTokenRepository, accessTokenRepo repository.AccessTokenRepository, refreshTokenRepo repository.RefreshTokenRepository, secret string) *AuthService {
+	return &AuthService{
+		userRepo:         userRepo,
+		sessionServce:    sessionService,
+		authTokenRepo:    authTokenRepo,
+		accessTokenRepo:  accessTokenRepo,
+		refreshTokenRepo: refreshTokenRepo,
+		secret:           secret,
+	}
+}
 
 func (service *AuthService) CreateRefreshToken(ctx context.Context, userID string) (*repository.RefreshToken,error ) {
 	refreshToken := &repository.RefreshToken{ 

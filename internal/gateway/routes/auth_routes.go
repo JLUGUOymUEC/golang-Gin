@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler,, authService *service.AuthService) {
+func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authService *service.AuthService) {
 
 	auth := router.Group("/auth")
 	{

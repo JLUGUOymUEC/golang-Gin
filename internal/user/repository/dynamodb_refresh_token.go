@@ -89,20 +89,14 @@ func (repo *DynamoRefreshTokenRepository) RevokeToken(ctx context.Context, token
 	return nil
 }
 
-func (repo *DynamoRefreshTokenRepository) RotateToken(ctx context.Context, tokenID string) error {
-	ttl := time.Now().Unix() + 30*24*3600
-	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(repo.tableName),
-		Key: map[string]types.AttributeValue{
-			"refresh_token_id": &types.AttributeValueMemberS{Value: tokenID},
-		},
-		UpdateExpression: aws.String("SET ttl = :ttl"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":ttl": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", ttl)},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("Failed to update item: %w ", err)
+func (repo *DynamoRefreshTokenRepository) RotateToken(ctx context.Context, tokenID string) (*RefreshToken,error) {
+	err := repo.RevokeToken(ctx, tokenID)
+
+	newToken := &RefreshToken{
 	}
-	return nil
+	newToken.BeforeCreate()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to update item: %w ", err)
+	}
+	return newToken, nil
 }

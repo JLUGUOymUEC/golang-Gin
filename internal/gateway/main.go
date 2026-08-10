@@ -1,0 +1,104 @@
+package gateway
+
+import (
+	"context"
+	"errors"
+	"gin-demo/internal/handler"
+	"gin-demo/internal/user/repository"
+	"gin-demo/internal/user/service"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
+)
+
+type Config struct {
+	Secret string `yaml:"secret"`
+}
+
+type dependencies struct {
+	authService *service.AuthService //用于验证bearer jwt的
+
+	authHandler   *handler.AuthHandler
+	clientHandler *handler.ClientHandler
+	userHandler   *handler.UserHandler
+}
+
+func loadConfigFromYaml(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var config Config
+	err = yaml.Unmarshal(data, &config)
+	if config.Secret == "" {
+		return nil, errors.New("secret is required")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func buildDependecies(context context.Context) (*dependencies, error) {
+	config, err := loadConfigFromYaml("./config.yaml")
+	if err != nil {
+		return nil, err
+	}
+
+	userRepo, err := repository.NewDynamoUserRepository(context)
+	if err != nil {
+		return nil, err
+	}
+	sessionRepo, err := repository.NewDynamoSessionRepository(context)
+	if err != nil {
+		return nil, err
+	}
+
+	authTokenRepo, err := repository.NewDynamoAuthTokenRepository(context)
+	if err != nil {
+		return nil, err
+	}
+	accessTokenRepo, err := repository.NewDynamoAccessTokenRepository(context)
+	if err != nil {
+		return nil, err
+	}
+	clientRepo, err := repository.NewDynamoClientRepository(context)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshTokenRepo, err := repository.NewDynamoRefreshTokenRepository(context)
+	if err != nil {
+		return nil, err
+	}
+	sessionService := service.NewSessionService(sessionRepo)
+
+	authService  := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Secret)
+	clientService := service.NewClientService(clientRepo)
+	userService := service.NewUserService(userRepo)
+	accountService := service.NewAccountService(userRepo, sessionService)
+	authHandler := handler.NewAuthHandler(authService, accountService)
+	clientHandler := handler.NewClientHandler(clientService)
+	userHandler := handler.NewUserHandler(userService)
+
+	return &dependencies{
+		authService:   authService,
+		authHandler:   authHandler,
+		clientHandler: clientHandler,
+		userHandler:   userHandler,
+	}, nil
+}
+
+func Run(ctx context.Context) error {
+
+	return nil
+}
+
+func buildDependencies(ctx context.Context) (*dependencies, error) {
+
+}
+
+func buildRouter(deps *dependencies) *gin.Engine {
+
+}

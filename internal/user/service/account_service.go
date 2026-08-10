@@ -19,6 +19,14 @@ type UserProfile struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+func NewAccountService(userRepo repository.UserRepository, sessionService *SessionService) *AccountService {
+	return &AccountService{
+		userRepo: userRepo,
+		SessionService: sessionService,
+	}
+}
+
+
 func (service *AccountService) Register(ctx context.Context, user *repository.User, password string) error {
 	if err := user.Validate(); err != nil {
 		return fmt.Errorf("Invalid user data: %w", err)

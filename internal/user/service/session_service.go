@@ -11,7 +11,9 @@ type SessionService struct {
 	repo repository.SessionRepository
 }
 
-
+func NewSessionService(repo repository.SessionRepository) *SessionService {
+	return &SessionService{repo: repo}
+}
 
 func (service *SessionService) CreateSession(ctx context.Context, userID string) (*repository.Session, error) {
 	session := &repository.Session{

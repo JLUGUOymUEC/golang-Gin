@@ -10,6 +10,11 @@ type UserService struct {
 	repo repository.UserRepository
 }
 
+func NewUserService(repo repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+
 func (service *UserService) CreateUser(ctx context.Context, hashedPassword, email, username string) (*repository.User, error) {
 	exists, err := service.repo.GetUserByEmail(ctx, email)
 	if err != nil {

@@ -20,6 +20,10 @@ type UserResponse struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+func NewUserHandler(userService *service.UserService) *UserHandler {
+	return &UserHandler{userService: userService}
+}
+
 // GET /users?limit=20 第二次 GET /users?limit=20&next_token=eyJ1c2VyX2lkIjoiMiJ9
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -59,5 +63,19 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 	return
 }
 
-// DELETE /users/:id
-func (h *UserHandler) DeleteUser(c *gin.Context)
+// DELETE /users/me
+func (h *UserHandler) DeleteUser(c *gin.Context) {
+	user_id, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't get userid from middleware"})
+		return
+	}
+	err := h.userService.DeleteUser(c.Request.Context(), user_id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// clear cookie
+	c.SetCookie("session_id", "", -1, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "delete success"})
+}
