@@ -3,9 +3,11 @@ package gateway
 import (
 	"context"
 	"errors"
+	"gin-demo/internal/gateway/routes"
 	"gin-demo/internal/handler"
 	"gin-demo/internal/user/repository"
 	"gin-demo/internal/user/service"
+	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -74,7 +76,7 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 	}
 	sessionService := service.NewSessionService(sessionRepo)
 
-	authService  := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Secret)
+	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Secret)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
 	accountService := service.NewAccountService(userRepo, sessionService)
@@ -95,10 +97,20 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-func buildDependencies(ctx context.Context) (*dependencies, error) {
-
-}
-
 func buildRouter(deps *dependencies) *gin.Engine {
+	router := gin.New()
 
+	//在访问端口前会先调用一遍方法
+	router.Use(gin.Logger())
+	router.Use(gin.Recovery())
+	// router.Use(middleware.CORSMiddleware())
+	// router.Use(middleware.RateLimitMiddleware(...))
+
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	routes.RegisterClientRoutes(router, deps.clientHandler, deps.authService)
+	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService)
+	return router
 }
