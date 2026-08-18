@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
+	"gin-demo/internal/gateway/middleware"
 	"gin-demo/internal/gateway/routes"
 	"gin-demo/internal/handler"
 	"gin-demo/internal/user/repository"
@@ -15,7 +17,11 @@ import (
 )
 
 type Config struct {
-	Secret string `yaml:"secret"`
+	Gateway GatewayConfig `yaml:"Gateway"`
+}
+
+type GatewayConfig struct {
+	Secret string `yaml:"Secret"`
 }
 
 type dependencies struct {
@@ -33,7 +39,7 @@ func loadConfigFromYaml(path string) (*Config, error) {
 	}
 	var config Config
 	err = yaml.Unmarshal(data, &config)
-	if config.Secret == "" {
+	if config.Gateway.Secret == "" {
 		return nil, errors.New("secret is required")
 	}
 	if err != nil {
@@ -43,7 +49,11 @@ func loadConfigFromYaml(path string) (*Config, error) {
 }
 
 func buildDependecies(context context.Context) (*dependencies, error) {
-	config, err := loadConfigFromYaml("./config.yaml")
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "./configs/config.yaml"
+	}
+	config, err := loadConfigFromYaml(configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +86,7 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 	}
 	sessionService := service.NewSessionService(sessionRepo)
 
-	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Secret)
+	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Gateway.Secret)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
 	accountService := service.NewAccountService(userRepo, sessionService)
@@ -93,8 +103,15 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 }
 
 func Run(ctx context.Context) error {
-
-	return nil
+	dependencies, err := buildDependecies(ctx)
+	if err != nil {
+		return fmt.Errorf(err.Error())
+	}
+	router := buildRouter(dependencies)
+	if router == nil {
+		return fmt.Errorf("Build router failed")
+	}
+	return router.Run(":8080")
 }
 
 func buildRouter(deps *dependencies) *gin.Engine {
@@ -103,7 +120,7 @@ func buildRouter(deps *dependencies) *gin.Engine {
 	//在访问端口前会先调用一遍方法
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-	// router.Use(middleware.CORSMiddleware())
+	router.Use(middleware.CORSMiddleware())
 	// router.Use(middleware.RateLimitMiddleware(...))
 
 	router.GET("/health", func(c *gin.Context) {

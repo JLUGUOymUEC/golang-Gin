@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -89,11 +88,10 @@ func (repo *DynamoRefreshTokenRepository) RevokeToken(ctx context.Context, token
 	return nil
 }
 
-func (repo *DynamoRefreshTokenRepository) RotateToken(ctx context.Context, tokenID string) (*RefreshToken,error) {
+func (repo *DynamoRefreshTokenRepository) RotateToken(ctx context.Context, tokenID string) (*RefreshToken, error) {
 	err := repo.RevokeToken(ctx, tokenID)
 
-	newToken := &RefreshToken{
-	}
+	newToken := &RefreshToken{}
 	newToken.BeforeCreate()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to update item: %w ", err)
