@@ -43,10 +43,11 @@ type RefreshTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(authService *service.AuthService, accoutService *service.AccountService) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, accoutService *service.AccountService, userService *service.UserService) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		accountService: accoutService,
+		userService: userService,
 	}
 }
 
@@ -253,7 +254,7 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 	}
 	c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
-	return 
+	
 }
 
 func (h *AuthHandler) verifyEmailFormat(email string) bool {

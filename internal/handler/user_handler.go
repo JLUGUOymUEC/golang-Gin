@@ -60,7 +60,6 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"user": resp,
 	})
-	return
 }
 
 // DELETE /users/me
