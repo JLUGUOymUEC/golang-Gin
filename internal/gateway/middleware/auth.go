@@ -9,8 +9,9 @@ import (
 
 func AuthMiddleware(AuthService *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 只有带了认证信息才能挂JWT，JWT信息在Authorization: Bearer <token>中，token是JWT
 		// 格式Authorization: Bearer <token>（JWT字段）信息都在这里
-		authHeader  := c.GetHeader("Authorization")
+		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Authorization header is required"})
 			return
@@ -23,13 +24,14 @@ func AuthMiddleware(AuthService *service.AuthService) gin.HandlerFunc {
 			return
 		}
 		tokenString := parts[1]
-		tokenClaims, err := AuthService.ValidateAccessToken(c.Request.Context(),tokenString)
+		tokenClaims, err := AuthService.ValidateAccessToken(c.Request.Context(), tokenString)
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid or expired token"})
+			return
 		}
-		
+
 		c.Set("user_id", tokenClaims.UserID)
-		c.Set("token_id", tokenClaims.TokenID)
+		c.Set("token_id", tokenClaims.AccessTokenID)
 		c.Next()
 	}
 }

@@ -12,7 +12,8 @@ type AuthorizeToken struct {
 	UserID      string `dynamodbav:"user_id"`
 	CreatedAt   int64  `dynamodbav:"created_at"`
 	Revoked     bool   `dynamodbav:"revoked"`
-	ttl         int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 5分钟
+	TTL         int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 5分钟
+	ClientID    string `dynamodbav:"client_id"`
 	RedirectURI string `dynamodbav:"redirect_uri"`
 }
 
@@ -21,7 +22,7 @@ type AccessToken struct {
 	UserID        string `dynamodbav:"user_id"`
 	CreatedAt     int64  `dynamodbav:"created_at"`
 	Revoked       bool   `dynamodbav:"revoked"`
-	ttl           int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 24小时
+	TTL           int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 24小时
 }
 
 type RefreshToken struct {
@@ -29,7 +30,7 @@ type RefreshToken struct {
 	UserID         string `dynamodbav:"user_id"`
 	CreatedAt      int64  `dynamodbav:"created_at"`
 	Revoked        bool   `dynamodbav:"revoked"`
-	ttl            int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 7天
+	TTL            int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 7天
 }
 
 func (t *AuthorizeToken) Validate() error {
@@ -56,7 +57,7 @@ func (t *RefreshToken) Validate() error {
 func (t *AuthorizeToken) BeforeCreate() {
 	now := time.Now().Unix()
 	t.CreatedAt = now
-	t.ttl = now + 5*60 // 5分钟后过期
+	t.TTL = now + 5*60 // 5分钟后过期
 	t.AuthTokenID = uuid.New().String()
 	t.Revoked = false
 }
@@ -64,7 +65,7 @@ func (t *AuthorizeToken) BeforeCreate() {
 func (t *AccessToken) BeforeCreate() {
 	now := time.Now().Unix()
 	t.CreatedAt = now
-	t.ttl = now + 24*60*60 // 24小时后过期
+	t.TTL = now + 24*60*60 // 24小时后过期
 	t.AccessTokenID = uuid.New().String()
 	t.Revoked = false
 }
@@ -72,7 +73,7 @@ func (t *AccessToken) BeforeCreate() {
 func (t *RefreshToken) BeforeCreate() {
 	now := time.Now().Unix()
 	t.CreatedAt = now
-	t.ttl = now + 5*60 // 5分钟后过期
+	t.TTL = now + 5*60 // 5分钟后过期
 	t.RefreshTokenID = uuid.New().String()
 	t.Revoked = false
 }

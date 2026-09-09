@@ -1,0 +1,3 @@
+./auth_handler.go
+./client_handler.go
+./user_handler.go

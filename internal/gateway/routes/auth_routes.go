@@ -11,14 +11,16 @@ import (
 func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authService *service.AuthService) {
 
 	auth := router.Group("/auth")
+	publicAuth := router.Group("/auth") // 公开的路由不需要JWT认证
 	auth.Use(middleware.AuthMiddleware(authService))
 	{
-		auth.POST("/login", authHandler.Login)
+		publicAuth.GET("/authorize", authHandler.Authorize)
+		publicAuth.POST("/login", authHandler.Login)
 		auth.POST("/logout", authHandler.Logout)
-		auth.POST("/token", authHandler.ExchangeToken)
-		auth.POST("/refresh", authHandler.RefreshToken)
+		publicAuth.POST("/token", authHandler.ExchangeToken)
+		publicAuth.POST("/refresh", authHandler.RefreshToken)
 		auth.POST("/revoke", authHandler.RevokeToken)
-		auth.POST("/register", authHandler.Register)
+		publicAuth.POST("/register", authHandler.Register)
 		auth.POST("/getprofile", authHandler.GetProfile)
 		auth.POST("/updateprofile", authHandler.UpdateProfile)
 		auth.POST("/changepassword", authHandler.ChangePassword)
@@ -32,5 +34,3 @@ func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, au
 		})
 	}
 }
-
-

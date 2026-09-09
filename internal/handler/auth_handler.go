@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"fmt"
 	"gin-demo/internal/gateway/middleware"
 	"gin-demo/internal/user/repository"
 	"gin-demo/internal/user/service"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,14 +18,19 @@ type AuthHandler struct {
 	authService    *service.AuthService
 	accountService *service.AccountService
 	userService    *service.UserService
+	clientService  *service.ClientService
 }
 
-type AuthorizeTokenClaims struct {
-	AuthTokenID string `json:"auth_token_id"`
-	UserID      string `json:"user_id"`
-	CreatedAt   int64  `json:"created_at"`
-	Revoked     bool   `json:"revoked"`
-	RedirectURI string `json:"redirect_uri"`
+const authorizationRequestCookie = "oidc_authorization_request"
+
+type authorizationRequestClaims struct {
+	ClientID            string `json:"client_id"`
+	RedirectURI         string `json:"redirect_uri"`
+	Scope               string `json:"scope"`
+	State               string `json:"state,omitempty"`
+	Nonce               string `json:"nonce,omitempty"`
+	CodeChallenge       string `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -43,11 +50,12 @@ type RefreshTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(authService *service.AuthService, accoutService *service.AccountService, userService *service.UserService) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
-		accountService: accoutService,
-		userService: userService,
+		accountService: accountService,
+		userService:    userService,
+		clientService:  clientService,
 	}
 }
 
@@ -90,35 +98,85 @@ func (h *AuthHandler) generateRefreshToken(refreshToken *repository.RefreshToken
 }
 
 func (h *AuthHandler) generateAuthToken(authToken *repository.AuthorizeToken) (string, error) {
-	claims := AuthorizeTokenClaims{
-		AuthTokenID: authToken.AuthTokenID,
-		UserID:      authToken.UserID,
-		CreatedAt:   authToken.CreatedAt,
-		Revoked:     authToken.Revoked,
-		RedirectURI: authToken.RedirectURI,
+
+	return authToken.AuthTokenID, nil
+}
+
+// Authorize validates the browser's OIDC authorization request and saves the
+// result until the user submits credentials to Login.
+// Get请求用bindquery，Post请求用ShouldBindJSON
+// 这步不带secret， accesstoken时才带
+func (h *AuthHandler) Authorize(c *gin.Context) {
+	var req struct {
+		ResponseType        string `form:"response_type" binding:"required"`
+		ClientID            string `form:"client_id" binding:"required"`
+		RedirectURI         string `form:"redirect_uri" binding:"required"`
+		Scope               string `form:"scope" binding:"required"`
+		State               string `form:"state"`
+		Nonce               string `form:"nonce"`
+		CodeChallenge       string `form:"code_challenge"`
+		CodeChallengeMethod string `form:"code_challenge_method"`
+	}
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.ResponseType != "code" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only response_type=code is supported"})
+		return
+	}
+
+	client, err := h.clientService.GetClientByID(c.Request.Context(), req.ClientID)
+	if err != nil || !client.IsActive {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid client_id"})
+		return
+	}
+	if client.RedirectURI != req.RedirectURI {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri does not match client registration"})
+		return
+	}
+	requestedScopes := strings.Fields(req.Scope)
+	if !containsScope(requestedScopes, "openid") || !scopesAllowed(requestedScopes, client.AllowedScopes) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
+
+	claims := authorizationRequestClaims{
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               req.Scope,
+		State:               req.State,
+		Nonce:               req.Nonce,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-
-	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := tokenClaims.SignedString([]byte(h.authService.GetSecretKey()))
+	requestToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(h.authService.GetSecretKey()))
 	if err != nil {
-		return "", err
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "create authorization request"})
+		return
 	}
-	return tokenString, nil
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(authorizationRequestCookie, requestToken, 300, "/auth", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "authorization request accepted; submit credentials to /auth/login"})
 }
 
 // POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		LoginID     string `json:"login_id" binding:"required"`
-		Password    string `json:"password" binding:"required"`
-		RedirectURI string `json:"redirect_uri" binding:"required"`
+		LoginID  string `json:"login_id" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	authorizationRequest, err := h.getAuthorizationRequest(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid authorization request is required"})
 		return
 	}
 	session, err := h.authService.Login(c.Request.Context(), req.LoginID, req.Password)
@@ -126,18 +184,57 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	//后面这个redirectURI
-	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, req.RedirectURI)
+	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	authTokenString, err := h.generateAuthToken(authToken)
+	token_id, err := h.generateAuthToken(authToken)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"auth_token": authTokenString, "session_id": session.SessionID, "expires_in": 300})
+	c.SetCookie(authorizationRequestCookie, "", -1, "/auth", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"auth_token": token_id, "session_id": session.SessionID, "expires_in": 300})
+}
+
+func (h *AuthHandler) getAuthorizationRequest(c *gin.Context) (*authorizationRequestClaims, error) {
+	requestToken, err := c.Cookie(authorizationRequestCookie)
+	if err != nil {
+		return nil, err
+	}
+	parsedToken, err := jwt.ParseWithClaims(requestToken, &authorizationRequestClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected authorization request signing method")
+		}
+		return []byte(h.authService.GetSecretKey()), nil
+	})
+	if err != nil || !parsedToken.Valid {
+		return nil, fmt.Errorf("invalid authorization request")
+	}
+	claims, ok := parsedToken.Claims.(*authorizationRequestClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid authorization request claims")
+	}
+	return claims, nil
+}
+
+func containsScope(scopes []string, target string) bool {
+	for _, scope := range scopes {
+		if scope == target {
+			return true
+		}
+	}
+	return false
+}
+
+func scopesAllowed(requestedScopes, allowedScopes []string) bool {
+	for _, scope := range requestedScopes {
+		if !containsScope(allowedScopes, scope) {
+			return false
+		}
+	}
+	return true
 }
 
 // POST /auth/logout
@@ -146,7 +243,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	var req struct {
 		SessionID string `json:"session_id" binding:"required"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -162,14 +259,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // POST /auth/token
 func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
-		AuthToken   string `json:"auth_token" binding:"required"`
-		RedirectURI string `json:"redirect_uri" binding:"required"`
+		AuthToken    string `json:"auth_token" binding:"required"`
+		RedirectURI  string `json:"redirect_uri" binding:"required"`
+		ClientSecret string `json:"client_secret" `
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken)
+	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -197,7 +295,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -236,7 +334,7 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 		AccessToken  string `json:"access_token" binding:"required"`
 		RefreshToken string `json:"refresh_token,omitempty"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -254,7 +352,7 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 	}
 	c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
-	
+
 }
 
 func (h *AuthHandler) verifyEmailFormat(email string) bool {
@@ -270,7 +368,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -316,7 +414,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		Username string `json:"username"`
 		Email    string `json:"email"`
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -384,7 +482,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't get userid from middleware"})
 		return
 	}
-	if err := c.BindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
