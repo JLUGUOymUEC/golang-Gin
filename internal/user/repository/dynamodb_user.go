@@ -106,6 +106,7 @@ func (repo *DynamoUserRepository) GetUserByUsername(ctx context.Context, usernam
 		&dynamodb.QueryInput{
 			TableName:              aws.String(repo.tableName),
 			KeyConditionExpression: aws.String("username = :userName"),
+			IndexName: aws.String("username-index"), // 需要 "username-index" 的全局二级索引
 			ProjectionExpression: aws.String(
 				"user_id, username, hashed_password, email, created_at, updated_at",
 			),
@@ -245,29 +246,36 @@ func (repo *DynamoUserRepository) DeleteUser(ctx context.Context, userID string)
 }
 
 func (repo *DynamoUserRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
-	resp, err := repo.client.GetItem(
+	resp, err := repo.client.Query(
 		ctx,
-		&dynamodb.GetItemInput{
+		&dynamodb.QueryInput{
 			TableName: aws.String(repo.tableName),
-			ProjectionExpression: aws.String(
-				"user_id, username, hashed_password, email, created_at, updated_at",
-			),
-			Key: map[string]types.AttributeValue{
-				"email": &types.AttributeValueMemberS{
+			IndexName: aws.String("email-index"), // 需要 "email-index" 的全局二级索引
+			KeyConditionExpression: aws.String("email = :email"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":email": &types.AttributeValueMemberS{
 					Value: email,
 				},
 			},
-		})
+			ProjectionExpression: aws.String(
+				"user_id, username, hashed_password, email, created_at, updated_at",
+			),
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to query item: %w ", err)
 	}
-	if len(resp.Item) == 0 {
+
+	if len(resp.Items) == 0 {
 		fmt.Println("User not found")
 		return nil, nil
 	}
+	if len(resp.Items) > 1 {
+		return nil, fmt.Errorf("Multiple users found with the same email")
+	}
 	var user User
 	err = attributevalue.UnmarshalMap(
-		resp.Item,
+		resp.Items[0],
 		&user,
 	)
 	return &user, nil

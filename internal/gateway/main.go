@@ -25,8 +25,8 @@ type GatewayConfig struct {
 }
 
 type dependencies struct {
-	authService *service.AuthService //用于验证bearer jwt的
-
+	authService   *service.AuthService //用于验证bearer jwt的
+	clientService *service.ClientService
 	authHandler   *handler.AuthHandler
 	clientHandler *handler.ClientHandler
 	userHandler   *handler.UserHandler
@@ -99,6 +99,7 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 		authHandler:   authHandler,
 		clientHandler: clientHandler,
 		userHandler:   userHandler,
+		clientService: clientService,
 	}, nil
 }
 
@@ -128,6 +129,6 @@ func buildRouter(deps *dependencies) *gin.Engine {
 	})
 
 	routes.RegisterClientRoutes(router, deps.clientHandler, deps.authService)
-	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService)
+	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService, deps.clientService)
 	return router
 }

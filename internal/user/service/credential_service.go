@@ -10,13 +10,15 @@ func HashPassword(password string) (string, error) {
 	if password == "" {
 		return "", fmt.Errorf("Password cannot be empty")
 	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost) //加盐每次生成的哈希值都不一样,所以不能直接比较哈希值,需要使用bcrypt.CompareHashAndPassword进行验证
 	if err != nil {
 		return "", fmt.Errorf("Failed to hash password: %w ", err)
 	}
 	return fmt.Sprintf("%x", hashedPassword), nil
 }
 
+
+//加盐对比方法
 func VerifyPassword(password string, hashedPassword string) bool {
 	return (bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))) == nil
 }

@@ -8,23 +8,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authService *service.AuthService) {
-
+func RegisterAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, authService *service.AuthService, clientService *service.ClientService) {
+	//这两个方法是客户端认证的路由，使用ClientMiddleware中间件来验证客户端的身份
+	clientAuth := router.Group("/auth")
+	clientAuth.Use(middleware.ClientMiddleware(clientService))
+	{
+		clientAuth.POST("/token", authHandler.ExchangeToken)
+		clientAuth.POST("/refresh", authHandler.RefreshToken)
+	}
 	auth := router.Group("/auth")
 	publicAuth := router.Group("/auth") // 公开的路由不需要JWT认证
-	auth.Use(middleware.AuthMiddleware(authService))
 	{
+
+		publicAuth.POST("/register", authHandler.Register)
 		publicAuth.GET("/authorize", authHandler.Authorize)
 		publicAuth.POST("/login", authHandler.Login)
+	}
+	auth.Use(middleware.AuthMiddleware(authService))
+	{
+
 		auth.POST("/logout", authHandler.Logout)
-		publicAuth.POST("/token", authHandler.ExchangeToken)
-		publicAuth.POST("/refresh", authHandler.RefreshToken)
 		auth.POST("/revoke", authHandler.RevokeToken)
-		publicAuth.POST("/register", authHandler.Register)
 		auth.POST("/getprofile", authHandler.GetProfile)
 		auth.POST("/updateprofile", authHandler.UpdateProfile)
 		auth.POST("/changepassword", authHandler.ChangePassword)
 	}
+	// 受保护的路由示例
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.AuthMiddleware(authService))
 	{

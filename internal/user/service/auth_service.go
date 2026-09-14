@@ -27,13 +27,21 @@ type AuthService struct {
 	secret           string
 }
 
-// JWT解析需要与AccessTokenClaims结构体保持一致 
-type TokenClaims struct {
-	AccessTokenID        string `json:"access_token_id"`
-	UserID               string `json:"user_id"`
-	CreatedAt            int64  `json:"created_at"`
-	Revoked              bool   `json:"revoked"`
-	jwt.RegisteredClaims        // 包含标准的JWT声明，如exp、iat等
+
+type AccessTokenClaims struct {
+	AccessTokenID string `json:"access_token_id"`
+	UserID        string `json:"user_id"`
+	CreatedAt     int64  `json:"created_at"`
+	Revoked       bool   `json:"revoked"`
+	jwt.RegisteredClaims
+}
+
+type RefreshTokenClaims struct {
+	RefreshTokenID string `json:"refresh_token_id"`
+	UserID         string `json:"user_id"`
+	CreatedAt      int64  `json:"created_at"`
+	Revoked        bool   `json:"revoked"`
+	jwt.RegisteredClaims
 }
 
 func (service *AuthService) GetSecretKey() string {
@@ -123,18 +131,22 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	return accessToken, nil
 }
 
-func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*TokenClaims, error) {
+func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*AccessTokenClaims, error) {
 	//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMTIzIiwic2Vzc2lvbl9pZCI6Inh4eCIsImV4cCI6MTY5OTk5OTk5OX0.signature
 	// ↑ Header                            ↑ Payload (claims)                  ↑ Signature
 	// 使用·jwt库解析和验证Token
-	token, err := jwt.ParseWithClaims(accessToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("Invalid token: %w ", err)
 	}
-	if claims, ok := token.Claims.(*TokenClaims); ok {
+	if claims, ok := token.Claims.(*AccessTokenClaims); ok {
 		return claims, nil
+	}
+	saved_token , err := service.accessTokenRepo.GetTokenByID(ctx, token.Claims.(*AccessTokenClaims).AccessTokenID)
+	if err != nil || saved_token.Revoked {
+		return nil, fmt.Errorf("Access token is invalid or revoked")
 	}
 	return nil, fmt.Errorf("Failed to valid token: %w ", err)
 }
@@ -142,16 +154,16 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (*repository.AccessToken, error) {
 
 	accessToken := &repository.AccessToken{}
-	token, err := jwt.ParseWithClaims(refreshToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("Invalid refresh token: %w ", err)
 	}
 
-	if claims, ok := token.Claims.(*TokenClaims); ok {
+	if claims, ok := token.Claims.(*RefreshTokenClaims); ok {
 		// 验证refresh token是否有效
-		refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.AccessTokenID)
+		refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.RefreshTokenID)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get refresh token: %w ", err)
 		}
@@ -174,13 +186,13 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 
 func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken string) error {
 
-	token, err := jwt.ParseWithClaims(accessToken, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
 		return fmt.Errorf("Invalid token: %w ", err)
 	}
-	if claims, ok := token.Claims.(*TokenClaims); ok {
+	if claims, ok := token.Claims.(*AccessTokenClaims); ok {
 		return service.accessTokenRepo.RevokeToken(ctx, claims.AccessTokenID)
 	}
 	return fmt.Errorf("Failed to revoke token: %w ", err)

@@ -24,14 +24,23 @@ func ClientMiddleware(ClientService *service.ClientService) gin.HandlerFunc {
 			return
 		}
 		decodedClient, err := base64.StdEncoding.DecodeString(parts[1])
-
+		if err != nil {
+			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid authorization header"})
+			return
+		}
+		
 		partsDecoded := strings.SplitN(string(decodedClient), ":", 2)
 		client_id := partsDecoded[0]
 		client_secret := partsDecoded[1]
 		client, err := ClientService.GetClientByID(c.Request.Context(), client_id)
-		hashed_client_secret, err := service.HashPassword(client_secret)
-		if err != nil || hashed_client_secret != client.ClientSecretHash {
+		if err != nil || client == nil {
+			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid client_id"})
+			return
+		}
+
+		if !service.VerifyPassword(client_secret, client.ClientSecretHash) {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid or expired secret"})
+			return
 		}
 		c.Set("client_id", client_id)
 		c.Set("client_secret", client_secret)

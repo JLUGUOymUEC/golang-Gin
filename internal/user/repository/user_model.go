@@ -11,7 +11,7 @@ import (
 type User struct {
 	UserID         string `dynamodbav:"user_id"`
 	Username       string `dynamodbav:"username"`
-	HashedPassword string `dynamodbav:"password"`
+	HashedPassword string `dynamodbav:"hashed_password"`
 	Email          string `dynamodbav:"email"`
 	CreatedAt      int64  `dynamodbav:"created_at"`
 	UpdatedAt      int64  `dynamodbav:"updated_at"`

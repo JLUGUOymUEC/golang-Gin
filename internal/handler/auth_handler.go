@@ -34,21 +34,7 @@ type authorizationRequestClaims struct {
 	jwt.RegisteredClaims
 }
 
-type AccessTokenClaims struct {
-	AccessTokenID string `json:"access_token_id"`
-	UserID        string `json:"user_id"`
-	CreatedAt     int64  `json:"created_at"`
-	Revoked       bool   `json:"revoked"`
-	jwt.RegisteredClaims
-}
 
-type RefreshTokenClaims struct {
-	RefreshTokenID string `json:"refresh_token_id"`
-	UserID         string `json:"user_id"`
-	CreatedAt      int64  `json:"created_at"`
-	Revoked        bool   `json:"revoked"`
-	jwt.RegisteredClaims
-}
 
 func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService) *AuthHandler {
 	return &AuthHandler{
@@ -60,7 +46,7 @@ func NewAuthHandler(authService *service.AuthService, accountService *service.Ac
 }
 
 func (h *AuthHandler) generateAccessToken(accessToken *repository.AccessToken) (string, error) {
-	claims := AccessTokenClaims{
+	claims := service.AccessTokenClaims{
 		AccessTokenID: accessToken.AccessTokenID,
 		UserID:        accessToken.UserID,
 		CreatedAt:     accessToken.CreatedAt,
@@ -79,7 +65,7 @@ func (h *AuthHandler) generateAccessToken(accessToken *repository.AccessToken) (
 }
 
 func (h *AuthHandler) generateRefreshToken(refreshToken *repository.RefreshToken) (string, error) {
-	claims := RefreshTokenClaims{
+	claims := service.RefreshTokenClaims{
 		RefreshTokenID: refreshToken.RefreshTokenID,
 		UserID:         refreshToken.UserID,
 		CreatedAt:      refreshToken.CreatedAt,
