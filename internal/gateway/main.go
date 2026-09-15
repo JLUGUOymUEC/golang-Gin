@@ -86,7 +86,7 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 	}
 	sessionService := service.NewSessionService(sessionRepo)
 
-	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, config.Gateway.Secret)
+	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, clientRepo, config.Gateway.Secret)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
 	accountService := service.NewAccountService(userRepo, sessionService)
