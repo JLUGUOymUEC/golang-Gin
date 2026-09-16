@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"gin-demo/internal/gateway/middleware"
 	"gin-demo/internal/user/repository"
@@ -33,8 +36,6 @@ type authorizationRequestClaims struct {
 	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
 	jwt.RegisteredClaims
 }
-
-
 
 func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService) *AuthHandler {
 	return &AuthHandler{
@@ -92,6 +93,7 @@ func (h *AuthHandler) generateAuthToken(authToken *repository.AuthorizeToken) (s
 // result until the user submits credentials to Login.
 // Get请求用bindquery，Post请求用ShouldBindJSON
 // 这步不带secret， accesstoken时才带
+// codechallenge校验verifier在exchange，nonce在token中
 func (h *AuthHandler) Authorize(c *gin.Context) {
 	var req struct {
 		ResponseType        string `form:"response_type" binding:"required"`
@@ -126,7 +128,11 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 		return
 	}
-
+	err = validatePKCE(req.CodeChallenge, req.CodeChallengeMethod)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("PKCE error occurred: %v", err)})
+		return
+	}
 	claims := authorizationRequestClaims{
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -435,7 +441,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
-	return
+
 }
 
 func (h *AuthHandler) VerifyPasswordFormat(password string) bool {
@@ -483,4 +489,46 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Change Password successfully"})
 	return
+}
+
+// private function
+// codechallenge是verifier做哈希出来再base64url编码的结果,所以是43字符
+// plain格式就是不编码
+func validatePKCE(codeChallenge string, method string) error {
+	if codeChallenge == "" {
+		return fmt.Errorf("codeChallenge is required")
+	}
+	if method == "" {
+		return fmt.Errorf("method is required")
+	}
+	switch method {
+	case "S256":
+		// BASE64URL(SHA256(verifier))，43 个字符
+		if len(codeChallenge) != 43 {
+			return fmt.Errorf("invalid code challenge for S256")
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(codeChallenge); err != nil {
+			return fmt.Errorf("invalid code_challenge encoding")
+		}
+	case "plain":
+		if len(codeChallenge) < 43 || len(codeChallenge) > 128 {
+			return fmt.Errorf("invalid code challenge for plain")
+		}
+	default:
+		return fmt.Errorf("invalid code challenge method")
+	}
+	return nil
+}
+
+func verifyPKCE(verifier string, challenge string, method string) bool {
+	switch method {
+	case "S256":
+		sum := sha256.Sum256([]byte(verifier))
+		// []byte转切片 sum[0:]
+		expected := base64.RawURLEncoding.EncodeToString(sum[0:])
+		return subtle.ConstantTimeCompare([]byte(expected), []byte(challenge)) == 1
+	case "plain":
+		return subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) == 1
+	}
+	return false
 }
