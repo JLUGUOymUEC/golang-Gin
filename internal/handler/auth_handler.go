@@ -188,7 +188,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	c.SetCookie(authorizationRequestCookie, "", -1, "/auth", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"auth_token": token_id, "session_id": session.SessionID, "expires_in": 300})
+	c.JSON(http.StatusOK, gin.H{"code": token_id, "session_id": session.SessionID, "expires_in": 300})
 }
 
 func (h *AuthHandler) getAuthorizationRequest(c *gin.Context) (*authorizationRequestClaims, error) {
@@ -252,10 +252,12 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // POST /auth/token
 func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
+		GrantType    string `json:"grant_type" binding:"required"`
 		ClientID     string `json:"client_id" binding:"required"`
-		AuthToken    string `json:"auth_token" binding:"required"`
+		AuthToken    string `json:"code" binding:"required"`
 		RedirectURI  string `json:"redirect_uri" binding:"required"`
 		ClientSecret string `json:"client_secret" `
+		CodeVerifier string `json:"code_verifier" `
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -39,7 +39,7 @@ func (repo *DynamoAuthTokenRepository) CreateToken(ctx context.Context, token *A
 	token.BeforeCreate()
 	item, err := attributevalue.MarshalMap(token)
 	if err != nil {
-		return fmt.Errorf("Failed to marshal auth_token:  %w", err)
+		return fmt.Errorf("Failed to marshal code:  %w", err)
 	}
 	_, err = repo.client.PutItem(
 		ctx,
