@@ -159,6 +159,7 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 // POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
+		ClientID string `json:"client_id" binding:"required"`
 		LoginID  string `json:"login_id" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
@@ -176,7 +177,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI)
+	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -251,6 +252,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // POST /auth/token
 func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
+		ClientID     string `json:"client_id" binding:"required"`
 		AuthToken    string `json:"auth_token" binding:"required"`
 		RedirectURI  string `json:"redirect_uri" binding:"required"`
 		ClientSecret string `json:"client_secret" `
@@ -259,7 +261,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI)
+	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

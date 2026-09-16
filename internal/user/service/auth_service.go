@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gin-demo/internal/user/repository"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -24,9 +25,9 @@ type AuthService struct {
 	authTokenRepo    repository.AuthTokenRepository
 	accessTokenRepo  repository.AccessTokenRepository
 	refreshTokenRepo repository.RefreshTokenRepository
+	clientRepo       repository.ClientRepository
 	secret           string
 }
-
 
 type AccessTokenClaims struct {
 	AccessTokenID string `json:"access_token_id"`
@@ -48,13 +49,14 @@ func (service *AuthService) GetSecretKey() string {
 	return service.secret
 }
 
-func NewAuthService(userRepo repository.UserRepository, sessionService *SessionService, authTokenRepo repository.AuthTokenRepository, accessTokenRepo repository.AccessTokenRepository, refreshTokenRepo repository.RefreshTokenRepository, secret string) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, sessionService *SessionService, authTokenRepo repository.AuthTokenRepository, accessTokenRepo repository.AccessTokenRepository, refreshTokenRepo repository.RefreshTokenRepository, clientRepo repository.ClientRepository, secret string) *AuthService {
 	return &AuthService{
 		userRepo:         userRepo,
 		sessionServce:    sessionService,
 		authTokenRepo:    authTokenRepo,
 		accessTokenRepo:  accessTokenRepo,
 		refreshTokenRepo: refreshTokenRepo,
+		clientRepo:       clientRepo,
 		secret:           secret,
 	}
 }
@@ -64,31 +66,35 @@ func (service *AuthService) CreateRefreshToken(ctx context.Context, userID strin
 		UserID: userID,
 	}
 	refreshToken.BeforeCreate()
+	err := service.refreshTokenRepo.CreateToken(ctx, refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create refresh token: %w ", err)
+	}
 	if err := refreshToken.Validate(); err != nil {
 		return nil, fmt.Errorf("Invalid refresh token data: %w ", err)
 	}
 	return refreshToken, nil
 }
 
-func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshTokenID string) error {
-	refreshToken, err := service.refreshTokenRepo.GetTokenByID(ctx, refreshTokenID)
-	if err != nil {
-		return fmt.Errorf("Failed to get refresh token: %w ", err)
+func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
+	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(service.secret), nil
+	})
+	if err != nil || !token.Valid {
+		return fmt.Errorf("Invalid token: %w ", err)
 	}
-	if refreshToken.Validate() != nil || refreshToken.Revoked {
-		return fmt.Errorf("Refresh token is invalid or revoked")
+	if claims, ok := token.Claims.(*RefreshTokenClaims); ok {
+		return service.refreshTokenRepo.RevokeToken(ctx, claims.RefreshTokenID)
 	}
-	err = service.refreshTokenRepo.RevokeToken(ctx, refreshTokenID)
-	if err != nil {
-		return fmt.Errorf("Failed to revoke refresh token: %w ", err)
-	}
-	return nil
+
+	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
-func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirectURI string) (*repository.AuthorizeToken, error) {
+func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirectURI string, clientID string) (*repository.AuthorizeToken, error) {
 	authToken := &repository.AuthorizeToken{
 		UserID:      userID,
 		RedirectURI: redirectURI,
+		ClientID:    clientID,
 		Revoked:     false,
 	}
 	authToken.BeforeCreate()
@@ -102,7 +108,11 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirec
 	return authToken, nil //handler里要把token转为字符串返回给客户端
 }
 
-func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string ,RedirectURI string ) (*repository.AccessToken, error) {
+func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string) (*repository.AccessToken, error) {
+	client, err := service.clientRepo.GetClientByID(ctx, clientID)
+	if err != nil || client == nil || client.IsActive == false {
+		return nil, fmt.Errorf("Invalid client_id")
+	}
 	authToken, err := service.authTokenRepo.GetTokenByID(ctx, authTokenID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get auth token: %w ", err)
@@ -113,7 +123,9 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	if authToken.Revoked {
 		return nil, fmt.Errorf("Auth token is revoked")
 	}
-	// 添加校验RedirectURI
+	if authToken.RedirectURI != RedirectURI {
+		return nil, fmt.Errorf("Redirect URI does not match")
+	}
 	accessToken := &repository.AccessToken{
 		UserID:  authToken.UserID,
 		Revoked: false,
@@ -142,11 +154,11 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 		return nil, fmt.Errorf("Invalid token: %w ", err)
 	}
 	if claims, ok := token.Claims.(*AccessTokenClaims); ok {
+		saved_token, err := service.accessTokenRepo.GetTokenByID(ctx, claims.AccessTokenID)
+		if err != nil || saved_token == nil || saved_token.TTL <= time.Now().Unix() || saved_token.Revoked || saved_token.UserID != claims.UserID {
+			return nil, fmt.Errorf("Access token is invalid or revoked")
+		}
 		return claims, nil
-	}
-	saved_token , err := service.accessTokenRepo.GetTokenByID(ctx, token.Claims.(*AccessTokenClaims).AccessTokenID)
-	if err != nil || saved_token.Revoked {
-		return nil, fmt.Errorf("Access token is invalid or revoked")
 	}
 	return nil, fmt.Errorf("Failed to valid token: %w ", err)
 }
