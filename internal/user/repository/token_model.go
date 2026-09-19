@@ -8,15 +8,16 @@ import (
 )
 
 type AuthorizeToken struct {
-	AuthTokenID string `dynamodbav:"auth_token_id"`
-	UserID      string `dynamodbav:"user_id"`
-	CreatedAt   int64  `dynamodbav:"created_at"`
-	Revoked     bool   `dynamodbav:"revoked"`
-	TTL         int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 5分钟
-	ClientID    string `dynamodbav:"client_id"`
-	CodeChallenge string `dynamodbav:"code_challenge"`
+	AuthTokenID         string `dynamodbav:"auth_token_id"`
+	UserID              string `dynamodbav:"user_id"`
+	CreatedAt           int64  `dynamodbav:"created_at"`
+	Revoked             bool   `dynamodbav:"revoked"`
+	TTL                 int64  `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据 5分钟
+	ClientID            string `dynamodbav:"client_id"`
+	CodeChallenge       string `dynamodbav:"code_challenge"`
 	CodeChallengeMethod string `dynamodbav:"code_challenge_method"`
-	RedirectURI string `dynamodbav:"redirect_uri"`
+	RedirectURI         string `dynamodbav:"redirect_uri"`
+	SessionID           string `dynamodbav:"session_id"`
 }
 
 type AccessToken struct {

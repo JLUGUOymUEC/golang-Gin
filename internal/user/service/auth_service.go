@@ -2,14 +2,32 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"gin-demo/internal/user/repository"
 	"time"
-	"encoding/base64"
+
 	"github.com/golang-jwt/jwt/v5"
-	"crypto/sha256"
-	"crypto/subtle"
 )
+
+// ErrRefreshTokenInvalid 是 refresh token 不可用的统一出口（不存在、已撤销、并发竞争失败）。
+// handler 据此回 401，而不是把它当成服务端错误。
+var ErrRefreshTokenInvalid = errors.New("refresh token is invalid or already used")
+
+// ErrSessionNotOwned 表示该 session 不属于当前已认证用户。
+var ErrSessionNotOwned = errors.New("session does not belong to the authenticated user")
+
+// classifyRefreshTokenRevokeErr 把仓储层的撤销错误映射成对外统一语义。
+func classifyRefreshTokenRevokeErr(err error) error {
+	if errors.Is(err, repository.ErrRefreshTokenAlreadyRevoked) ||
+		errors.Is(err, repository.ErrRefreshTokenNotFound) {
+		return ErrRefreshTokenInvalid
+	}
+	return fmt.Errorf("Failed to revoke refresh token: %w ", err)
+}
 
 // type AuthService interface {
 //     // 授权码流程
@@ -44,6 +62,7 @@ type RefreshTokenClaims struct {
 	UserID         string `json:"user_id"`
 	CreatedAt      int64  `json:"created_at"`
 	Revoked        bool   `json:"revoked"`
+	SessionID      string `json:"session_id"`
 	jwt.RegisteredClaims
 }
 
@@ -92,7 +111,7 @@ func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken
 	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
-func (service *AuthService) CreateAuthToken(ctx context.Context, userID string , redirectURI string, clientID string, codeChallenge string, codeChallengeMethod string) (*repository.AuthorizeToken, error) {
+func (service *AuthService) CreateAuthToken(ctx context.Context, userID string , redirectURI string, clientID string, codeChallenge string, codeChallengeMethod string ,sessionID string) (*repository.AuthorizeToken, error) {
 	authToken := &repository.AuthorizeToken{
 		UserID: userID,
 		RedirectURI: redirectURI,
@@ -100,6 +119,7 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID string ,
 		CodeChallenge: codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
 		Revoked:  false,
+		SessionID: sessionID,
 	}
 	authToken.BeforeCreate()
 	if err := authToken.Validate(); err != nil {
@@ -112,28 +132,28 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID string ,
 	return authToken, nil //handler里要把token转为字符串返回给客户端
 }
 
-func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string, codeVerifier string) (*repository.AccessToken, error) {
+func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string, codeVerifier string) (*repository.AccessToken,string, error) {
 
 	authToken, err := service.authTokenRepo.GetTokenByID(ctx, authTokenID)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get auth token: %w ", err)
+		return nil,"", fmt.Errorf("Failed to get auth token: %w ", err)
 	}
 	if err = authToken.Validate(); err != nil {
-		return nil, fmt.Errorf("Invalid auth token: %w ", err)
+		return nil,"", fmt.Errorf("Invalid auth token: %w ", err)
 	}
 	if ok := verifyPKCE(codeVerifier, authToken.CodeChallenge, authToken.CodeChallengeMethod); !ok{
-		return nil, fmt.Errorf("Invalid codeVerifier: %w ", err)
+		return nil,"", fmt.Errorf("Invalid codeVerifier: %w ", err)
 	}
 	client, err := service.clientRepo.GetClientByID(ctx, clientID)
 	if err != nil || client == nil || client.IsActive == false {
-		return nil, fmt.Errorf("Invalid client_id")
+		return nil,"", fmt.Errorf("Invalid client_id")
 	}
 
 	if authToken.Revoked {
-		return nil, fmt.Errorf("Auth token is revoked")
+		return nil,"", fmt.Errorf("Auth token is revoked")
 	}
 	if authToken.RedirectURI != RedirectURI {
-		return nil, fmt.Errorf("Redirect URI does not match")
+		return nil,"", fmt.Errorf("Redirect URI does not match")
 	}
 	accessToken := &repository.AccessToken{
 		UserID:  authToken.UserID,
@@ -141,15 +161,15 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	}
 	accessToken.BeforeCreate()
 	if err := accessToken.Validate(); err != nil {
-		return nil, fmt.Errorf("Invalid access token data: %w ", err)
+		return nil,"", fmt.Errorf("Invalid access token data: %w ", err)
 	}
 	if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
-		return nil, fmt.Errorf("Failed to create access token: %w ", err)
+		return nil,"", fmt.Errorf("Failed to create access token: %w ", err)
 	}
 	if err := service.authTokenRepo.RevokeToken(ctx, authTokenID); err != nil {
-		return nil, fmt.Errorf("Failed to revoke access token: %w ", err)
+		return nil,"", fmt.Errorf("Failed to revoke access token: %w ", err)
 	}
-	return accessToken, nil
+	return accessToken,authToken.SessionID, nil
 }
 
 func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*AccessTokenClaims, error) {
@@ -177,43 +197,49 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 }
 
 func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (*repository.AccessToken, error) {
-
 	accessToken := &repository.AccessToken{}
+
 	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected alg: %v", token.Method.Alg())
+		}
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("Invalid refresh token: %w ", err)
 	}
 
-	if claims, ok := token.Claims.(*RefreshTokenClaims); ok {
-		// 验证refresh token是否有效
-		refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.RefreshTokenID)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to get refresh token: %w ", err)
-		}
-		if refreshTokenRecord.Validate() != nil || refreshTokenRecord.Revoked {
-			return nil, fmt.Errorf("Refresh token is invalid or revoked")
-		}
-		// 创建新的access token
-		accessToken.UserID = claims.UserID
-		accessToken.BeforeCreate()
-		if err := accessToken.Validate(); err != nil {
-			return nil, fmt.Errorf("Invalid access token data: %w ", err)
-		}
-		//先revoke当前的
-		accessTokenRecord, err := service.accessTokenRepo.GetTokensByUserID(ctx, claims.UserID)
-		if err != nil {
-			return nil, fmt.Errorf("Invalid recorded access token data: %w ", err)
-		}
-		if err := service.accessTokenRepo.RevokeToken(); err != nil {
-			return nil, fmt.Errorf("Cant revoke recorded access token: %w ", err)
-		} 
-		//再发行新的
-		if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
-			return nil, fmt.Errorf("Failed to create access token: %w ", err)
-		}
-		
+	claims, ok := token.Claims.(*RefreshTokenClaims)
+	if !ok {
+		return nil, fmt.Errorf("Invalid refresh token claims")
+	}
+	refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.RefreshTokenID)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get refresh token: %w ", err)
+	}
+	if refreshTokenRecord.Validate() != nil || refreshTokenRecord.Revoked {
+		return nil, ErrRefreshTokenInvalid
+	}
+
+	// 关键：先原子地占用（撤销）这个 refresh token，再做后续副作用。
+	// 条件写的是"存在且 revoked = false"，所以并发请求里只有一个能成功，
+	// 其余会拿到 ErrRefreshTokenInvalid，不会各自签出一套 token。
+	if err := service.refreshTokenRepo.RevokeToken(ctx, claims.RefreshTokenID); err != nil {
+		return nil, classifyRefreshTokenRevokeErr(err)
+	}
+
+	// 按 user_id 撤销该用户此前所有 access token（Route A：一个用户可以并存多套）
+	if err := service.accessTokenRepo.RevokeAllByUserID(ctx, claims.UserID); err != nil {
+		return nil, fmt.Errorf("Failed to revoke previous access tokens: %w ", err)
+	}
+
+	accessToken.UserID = claims.UserID
+	accessToken.BeforeCreate()
+	if err := accessToken.Validate(); err != nil {
+		return nil, fmt.Errorf("Invalid access token data: %w ", err)
+	}
+	if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
+		return nil, fmt.Errorf("Failed to create access token: %w ", err)
 	}
 	return accessToken, nil
 }
@@ -221,6 +247,9 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken string) error {
 
 	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected alg: %v", token.Method.Alg())
+		}
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
@@ -258,6 +287,41 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 
 func (service *AuthService) Logout(ctx context.Context, sessionID string) error {
 	return service.sessionServce.RevokeSession(ctx, sessionID)
+}
+
+// ValidateSessionOwnership 校验 sessionID 属于 authenticatedUserID。
+// session_id 在 API 里是明文传递的 bearer 值，没有绑定调用方凭证，
+// 所以任何"按 session 操作"的入口都必须先过这一步，否则会变成登出任意用户。
+func (service *AuthService) ValidateSessionOwnership(ctx context.Context, authenticatedUserID, sessionID string) error {
+	session, err := service.sessionServce.ValidateSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session.UserID != authenticatedUserID {
+		return ErrSessionNotOwned
+	}
+	return nil
+}
+
+// RevokeAllUserCredentials 撤销该用户当前所有 access token、refresh token 和 session。
+// 用于登出与改密码——两处都需要"该用户全部凭证立即失效"。
+func (service *AuthService) RevokeAllUserCredentials(ctx context.Context, userID string) error {
+	if err := service.accessTokenRepo.RevokeAllByUserID(ctx, userID); err != nil {
+		return fmt.Errorf("Failed to revoke access tokens: %w ", err)
+	}
+	if err := service.refreshTokenRepo.RevokeAllByUserID(ctx, userID); err != nil {
+		return fmt.Errorf("Failed to revoke refresh tokens: %w ", err)
+	}
+	sessionIDs, err := service.sessionServce.GetSessionIDsByUserID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("Failed to get user sessions: %w ", err)
+	}
+	for _, sessionID := range sessionIDs {
+		if err := service.sessionServce.RevokeSession(ctx, sessionID); err != nil {
+			return fmt.Errorf("Failed to revoke session: %w ", err)
+		}
+	}
+	return nil
 }
 
 

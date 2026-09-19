@@ -18,6 +18,9 @@ type AccessTokenRepository interface {
 	GetTokensByUserID(ctx context.Context, userID string) (*AccessToken, error)
 	RotateToken(ctx context.Context, tokenID string) error
 	RevokeToken(ctx context.Context, tokenID string) error
+	// RevokeAllByUserID 撤销该用户当前所有未过期的 access token。
+	// 依赖 AccessTokens 表上的 user_id-index GSI（见 scripts/dynamodb-schema.md）。
+	RevokeAllByUserID(ctx context.Context, userID string) error
 }
 
 type RefreshTokenRepository interface {
@@ -26,7 +29,11 @@ type RefreshTokenRepository interface {
 	RotateToken(ctx context.Context, tokenID string) (*RefreshToken, error)
 	RevokeToken(ctx context.Context, tokenID string) error
 	GetTokensByUserID(ctx context.Context, userID string) (*RefreshToken, error)
+	// RevokeAllByUserID 撤销该用户当前所有未过期的 refresh token。
+	// 依赖 RefreshTokens 表上的 user_id-index GSI（见 scripts/dynamodb-schema.md）。
+	RevokeAllByUserID(ctx context.Context, userID string) error
 }
 
 var _ AuthTokenRepository = (*DynamoAuthTokenRepository)(nil)
 var _ AccessTokenRepository = (*DynamoAccessTokenRepository)(nil)
+var _ RefreshTokenRepository = (*DynamoRefreshTokenRepository)(nil)

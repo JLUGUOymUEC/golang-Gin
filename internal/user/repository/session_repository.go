@@ -34,6 +34,13 @@ type SessionRepository interface {
 		ctx context.Context,
 		userID string,
 	) ([]string, error)
+
+	BindTokens(
+		ctx context.Context,
+		sessionID string,
+		accessTokenID string,
+		refreshTokenID string,
+	) error
 }
 
 var _ SessionRepository = (*DynamoSessionRepository)(nil)

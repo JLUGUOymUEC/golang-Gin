@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"gin-demo/internal/gateway/middleware"
 	"gin-demo/internal/user/repository"
@@ -157,10 +158,10 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 // POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		ClientID            string `json:"client_id" binding:"required"`
-		LoginID             string `json:"login_id" binding:"required"`
-		Password            string `json:"password" binding:"required"`
-		RedirectURI         string `json:"redirect_uri" binding:"required"`
+		ClientID    string `json:"client_id" binding:"required"`
+		LoginID     string `json:"login_id" binding:"required"`
+		Password    string `json:"password" binding:"required"`
+		RedirectURI string `json:"redirect_uri" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -180,7 +181,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge, authorizationRequest.CodeChallengeMethod)
+	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge, authorizationRequest.CodeChallengeMethod, session.SessionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -243,9 +244,26 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Logout 会通过sessionID注销session和token
-	err := h.authService.Logout(c.Request.Context(), req.SessionID)
-	if err != nil {
+
+	// user_id 只能来自已验签的 JWT（AuthMiddleware 写入），不能从请求体接收。
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	// session_id 是 bearer 值，必须先确认它属于当前登录用户，
+	// 否则任何登录用户都能用别人的 session_id 把别人登出。
+	if err := h.authService.ValidateSessionOwnership(c.Request.Context(), userID, req.SessionID); err != nil {
+		if errors.Is(err, service.ErrSessionNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "session does not belong to you"})
+			return
+		}
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
+		return
+	}
+
+	// 撤销该用户全部凭证：access token + refresh token + session
+	if err := h.authService.RevokeAllUserCredentials(c.Request.Context(), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -266,7 +284,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID, req.CodeVerifier)
+	accessToken, session_id, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID, req.CodeVerifier)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -286,6 +304,10 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if err = h.accountService.SessionService.BindTokens(c.Request.Context(), session_id, accessToken.AccessTokenID, refreshToken.RefreshTokenID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "expires_in": 86400})
 }
 
@@ -300,16 +322,17 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
+		// refresh token 不存在/已撤销/并发竞争失败都归为 401，不是服务端错误
+		if errors.Is(err, service.ErrRefreshTokenInvalid) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token is invalid or already used"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 	// 轮换一个refreshToken
+	// 旧的 refresh token 已在 RefreshAccessToken 内原子撤销，这里不再重复撤销
 	newRefreshToken, err := h.authService.CreateRefreshToken(c.Request.Context(), accessToken.UserID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	err = h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

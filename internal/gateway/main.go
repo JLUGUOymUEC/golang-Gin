@@ -90,7 +90,7 @@ func buildDependecies(context context.Context) (*dependencies, *Config ,error) {
 	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, clientRepo, config.Gateway.Secret)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
-	accountService := service.NewAccountService(userRepo, sessionService)
+	accountService := service.NewAccountService(userRepo, sessionService, authService)
 	authHandler := handler.NewAuthHandler(authService, accountService, userService, clientService)
 	clientHandler := handler.NewClientHandler(clientService)
 	userHandler := handler.NewUserHandler(userService)
@@ -107,7 +107,7 @@ func buildDependecies(context context.Context) (*dependencies, *Config ,error) {
 func Run(ctx context.Context) error {
 	dependencies,config, err := buildDependecies(ctx)
 	if err != nil {
-		return fmt.Errorf(err.Error())
+		return fmt.Errorf("%w", err)
 	}
 	router := buildRouter(dependencies , config)
 	if router == nil {

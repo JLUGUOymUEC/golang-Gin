@@ -10,6 +10,7 @@ import (
 type AccountService struct {
 	userRepo       repository.UserRepository
 	SessionService *SessionService
+	authService    *AuthService // 改密码后需要撤销该用户全部凭证（token + session）
 }
 
 type UserProfile struct {
@@ -19,10 +20,11 @@ type UserProfile struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
-func NewAccountService(userRepo repository.UserRepository, sessionService *SessionService) *AccountService {
+func NewAccountService(userRepo repository.UserRepository, sessionService *SessionService, authService *AuthService) *AccountService {
 	return &AccountService{
-		userRepo: userRepo,
+		userRepo:       userRepo,
 		SessionService: sessionService,
+		authService:    authService,
 	}
 }
 
@@ -120,14 +122,9 @@ func (service *AccountService) ChangePassword(ctx context.Context, userID string
 	if err != nil {
 		return fmt.Errorf("Failed to update user password: %w", err)
 	}
-	sessionIDs, err := service.SessionService.GetSessionIDsByUserID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("Failed to get user sessions: %w", err)
-	}
-	for _, sessionID := range sessionIDs {
-		if err = service.SessionService.RevokeSession(ctx, sessionID); err != nil {
-			return fmt.Errorf("Failed to revoke user sessions: %w", err)
-		}
+	// 改密码后该用户全部凭证立即失效（access token + refresh token + session）
+	if err := service.authService.RevokeAllUserCredentials(ctx, userID); err != nil {
+		return fmt.Errorf("Failed to revoke user credentials: %w", err)
 	}
 
 	return nil

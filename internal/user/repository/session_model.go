@@ -18,6 +18,10 @@ type Session struct {
 	Revoked bool `dynamodbav:"revoked"`
 
 	TTL int64 `dynamodbav:"ttl"` // DynamoDB TTL字段，自动删除过期数据
+
+	AccessTokenID string `dynamodbav:"access_token_id"`
+
+	RefreshTokenID string `dynamodbav:"refresh_token_id"`
 }
 
 func (s *Session) Validate() error {

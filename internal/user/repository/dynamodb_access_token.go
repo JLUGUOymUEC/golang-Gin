@@ -119,12 +119,18 @@ func (repo *DynamoAccessTokenRepository) RotateToken(ctx context.Context, tokenI
 }
 
 func (repo *DynamoAccessTokenRepository) RevokeToken(ctx context.Context, tokenID string) error {
+	return repo.revokeByIDUnconditionally(ctx, tokenID)
+}
+
+// revokeByIDUnconditionally 不做条件判断地置 revoked=true。
+// 用于批量撤销：token 可能已被撤销、也可能已被 TTL 删除，这两种情况都不该算失败。
+func (repo *DynamoAccessTokenRepository) revokeByIDUnconditionally(ctx context.Context, tokenID string) error {
 	_, err := repo.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(repo.tableName),
 		Key: map[string]types.AttributeValue{
 			"access_token_id": &types.AttributeValueMemberS{Value: tokenID},
 		},
-		UpdateExpression: aws.String("Set revoked = :revoked"),
+		UpdateExpression: aws.String("SET revoked = :revoked"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":revoked": &types.AttributeValueMemberBOOL{Value: true},
 		},
@@ -133,4 +139,38 @@ func (repo *DynamoAccessTokenRepository) RevokeToken(ctx context.Context, tokenI
 		return fmt.Errorf("Failed to revoke token: %w ", err)
 	}
 	return nil
+}
+
+// RevokeAllByUserID 按 user_id 查出该用户所有 access token 并逐个撤销。
+// 需要 AccessTokens 表上名为 user_id-index 的 GSI；GSI 是最终一致的，
+// 刚创建、尚未进入索引的 token 可能被漏掉。
+func (repo *DynamoAccessTokenRepository) RevokeAllByUserID(ctx context.Context, userID string) error {
+	var startKey map[string]types.AttributeValue
+	for {
+		resp, err := repo.client.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(repo.tableName),
+			IndexName:              aws.String("user_id-index"),
+			KeyConditionExpression: aws.String("user_id = :user_id"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":user_id": &types.AttributeValueMemberS{Value: userID},
+			},
+			ExclusiveStartKey: startKey,
+		})
+		if err != nil {
+			return fmt.Errorf("Failed to query access tokens by user_id: %w ", err)
+		}
+		for _, item := range resp.Items {
+			idAttr, ok := item["access_token_id"].(*types.AttributeValueMemberS)
+			if !ok {
+				continue
+			}
+			if err := repo.revokeByIDUnconditionally(ctx, idAttr.Value); err != nil {
+				return err
+			}
+		}
+		if len(resp.LastEvaluatedKey) == 0 {
+			return nil
+		}
+		startKey = resp.LastEvaluatedKey
+	}
 }

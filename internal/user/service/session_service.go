@@ -87,3 +87,10 @@ func (service *SessionService) GetSessionIDsByUserID(ctx context.Context, userID
 	}
 	return sessionIDs, nil
 }
+
+func (service *SessionService) BindTokens(ctx context.Context, sessionID string, accessTokenID string, refreshTokenID string) error {
+	if err := service.repo.BindTokens(ctx, sessionID, accessTokenID, refreshTokenID); err != nil {
+		return err
+	}
+	return nil
+}

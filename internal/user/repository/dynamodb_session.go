@@ -157,3 +157,26 @@ func (repo *DynamoSessionRepository) GetSessionIDsByUserID(ctx context.Context, 
 	}
 	return sessionIDs, nil
 }
+
+
+func (repo *DynamoSessionRepository) BindTokens(ctx context.Context, sessionID string, accessTokenID string, refreshTokenID string) error{
+	_, err := repo.client.UpdateItem(
+		ctx,
+		&dynamodb.UpdateItemInput{
+			TableName: aws.String(repo.tableName),
+			Key: map[string]types.AttributeValue{
+				"session_id": &types.AttributeValueMemberS{Value: sessionID},
+			},
+			UpdateExpression: aws.String("SET access_token_id = :access_token_id, refresh_token_id = :refresh_token_id"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":access_token_id": &types.AttributeValueMemberS{Value: accessTokenID},
+				":refresh_token_id": &types.AttributeValueMemberS{Value: refreshTokenID},
+			},
+			ConditionExpression: aws.String("attribute_exists(session_id)"),			
+			},
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to bind tokens: %w", err)
+	}
+	return nil
+}
