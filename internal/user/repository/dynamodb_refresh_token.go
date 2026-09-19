@@ -98,3 +98,30 @@ func (repo *DynamoRefreshTokenRepository) RotateToken(ctx context.Context, token
 	}
 	return newToken, nil
 }
+
+func (repo *DynamoRefreshTokenRepository) GetTokensByUserID(ctx context.Context, userID string) (*RefreshToken, error) {
+	resp, err := repo.client.Query(
+		ctx,
+		&dynamodb.QueryInput{
+			TableName:              aws.String(repo.tableName),
+			IndexName:              aws.String("userID-index"), // 需要"userID-index""
+			KeyConditionExpression: aws.String("userID = :user_id"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":userID": &types.AttributeValueMemberS{
+					Value: userID,
+				},
+			},
+		})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get items: %w ", err)
+	}
+	if resp.Items == nil || len(resp.Items) > 1 {
+		return nil, fmt.Errorf("Access Tokens not found for user_id: %s", userID)
+	}
+	var refreshToken RefreshToken
+	err = attributevalue.UnmarshalMap(resp.Items[0], &refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal tokens: %w ", err)
+	}
+	return &refreshToken, nil
+}

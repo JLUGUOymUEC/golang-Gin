@@ -21,6 +21,7 @@ type Config struct {
 }
 
 type GatewayConfig struct {
+	AdminUserIDs []string `yaml:"AdminUserIDs"`
 	Secret string `yaml:"Secret"`
 }
 
@@ -48,41 +49,41 @@ func loadConfigFromYaml(path string) (*Config, error) {
 	return &config, nil
 }
 
-func buildDependecies(context context.Context) (*dependencies, error) {
+func buildDependecies(context context.Context) (*dependencies, *Config ,error) {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "./configs/config.yaml"
 	}
 	config, err := loadConfigFromYaml(configPath)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 
 	userRepo, err := repository.NewDynamoUserRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 	sessionRepo, err := repository.NewDynamoSessionRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 
 	authTokenRepo, err := repository.NewDynamoAuthTokenRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 	accessTokenRepo, err := repository.NewDynamoAccessTokenRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 	clientRepo, err := repository.NewDynamoClientRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 
 	refreshTokenRepo, err := repository.NewDynamoRefreshTokenRepository(context)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 	sessionService := service.NewSessionService(sessionRepo)
 
@@ -100,22 +101,22 @@ func buildDependecies(context context.Context) (*dependencies, error) {
 		clientHandler: clientHandler,
 		userHandler:   userHandler,
 		clientService: clientService,
-	}, nil
+	}, config,nil
 }
 
 func Run(ctx context.Context) error {
-	dependencies, err := buildDependecies(ctx)
+	dependencies,config, err := buildDependecies(ctx)
 	if err != nil {
 		return fmt.Errorf(err.Error())
 	}
-	router := buildRouter(dependencies)
+	router := buildRouter(dependencies , config)
 	if router == nil {
 		return fmt.Errorf("Build router failed")
 	}
 	return router.Run(":8080")
 }
 
-func buildRouter(deps *dependencies) *gin.Engine {
+func buildRouter(deps *dependencies, config *Config) *gin.Engine {
 	router := gin.New()
 
 	//在访问端口前会先调用一遍方法
@@ -128,7 +129,7 @@ func buildRouter(deps *dependencies) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	routes.RegisterClientRoutes(router, deps.clientHandler, deps.authService)
+	routes.RegisterClientRoutes(router, deps.clientHandler, deps.authService, config.Gateway.AdminUserIDs)
 	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService, deps.clientService)
 	return router
 }

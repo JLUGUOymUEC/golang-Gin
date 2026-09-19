@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"gin-demo/internal/user/service"
 	"strings"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,20 +18,29 @@ func ClientMiddleware(ClientService *service.ClientService) gin.HandlerFunc {
 
 		parts := strings.SplitN(clientHeader, " ", 2)
 
-		if parts[0] != "Basic" {
+		// clientHeader Basic base64(client_id: client_secret)
+		if len(parts) != 2 || parts[0] != "Basic" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Authorization header format must be Basic base64(client_id:client_secret)"})
 			return
 		}
+
 		decodedClient, err := base64.StdEncoding.DecodeString(parts[1])
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid authorization header"})
 			return
 		}
-		
+
 		partsDecoded := strings.SplitN(string(decodedClient), ":", 2)
 		client_id := partsDecoded[0]
 		client_secret := partsDecoded[1]
+
+		if client_id == "" || client_secret == "" {
+			c.AbortWithStatusJSON(401, gin.H{"error": "Client ID and secret are required"})
+			return
+		}
+
 		client, err := ClientService.GetClientByID(c.Request.Context(), client_id)
+
 		if err != nil || client == nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid client_id"})
 			return
@@ -46,13 +54,4 @@ func ClientMiddleware(ClientService *service.ClientService) gin.HandlerFunc {
 		c.Set("client_secret", client_secret)
 		c.Next()
 	}
-}
-
-func GetCurrentUserID(c *gin.Context) (string, bool) {
-	value, ok := c.Get("user_id") // 从上下文获取id
-	if !ok {
-		return "", false
-	}
-	userID, ok := value.(string) // 类型断言
-	return userID, true
 }

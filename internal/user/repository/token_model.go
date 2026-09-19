@@ -67,7 +67,7 @@ func (t *AuthorizeToken) BeforeCreate() {
 func (t *AccessToken) BeforeCreate() {
 	now := time.Now().Unix()
 	t.CreatedAt = now
-	t.TTL = now + 24*60*60 // 24小时后过期
+	t.TTL = now + 1*60*60 // 1小时后过期
 	t.AccessTokenID = uuid.New().String()
 	t.Revoked = false
 }
@@ -75,7 +75,7 @@ func (t *AccessToken) BeforeCreate() {
 func (t *RefreshToken) BeforeCreate() {
 	now := time.Now().Unix()
 	t.CreatedAt = now
-	t.TTL = now + 5*60 // 5分钟后过期
+	t.TTL = now + 24*60*60 // 24小时后过期
 	t.RefreshTokenID = uuid.New().String()
 	t.Revoked = false
 }

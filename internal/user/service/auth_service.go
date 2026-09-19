@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"gin-demo/internal/user/repository"
 	"time"
-
+	"encoding/base64"
 	"github.com/golang-jwt/jwt/v5"
+	"crypto/sha256"
+	"crypto/subtle"
 )
 
 // type AuthService interface {
@@ -90,12 +92,14 @@ func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken
 	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
-func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirectURI string, clientID string) (*repository.AuthorizeToken, error) {
+func (service *AuthService) CreateAuthToken(ctx context.Context, userID string , redirectURI string, clientID string, codeChallenge string, codeChallengeMethod string) (*repository.AuthorizeToken, error) {
 	authToken := &repository.AuthorizeToken{
-		UserID:      userID,
+		UserID: userID,
 		RedirectURI: redirectURI,
-		ClientID:    clientID,
-		Revoked:     false,
+		ClientID:  clientID,
+		CodeChallenge: codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		Revoked:  false,
 	}
 	authToken.BeforeCreate()
 	if err := authToken.Validate(); err != nil {
@@ -108,11 +112,8 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID, redirec
 	return authToken, nil //handler里要把token转为字符串返回给客户端
 }
 
-func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string) (*repository.AccessToken, error) {
-	client, err := service.clientRepo.GetClientByID(ctx, clientID)
-	if err != nil || client == nil || client.IsActive == false {
-		return nil, fmt.Errorf("Invalid client_id")
-	}
+func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string, codeVerifier string) (*repository.AccessToken, error) {
+
 	authToken, err := service.authTokenRepo.GetTokenByID(ctx, authTokenID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get auth token: %w ", err)
@@ -120,6 +121,14 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	if err = authToken.Validate(); err != nil {
 		return nil, fmt.Errorf("Invalid auth token: %w ", err)
 	}
+	if ok := verifyPKCE(codeVerifier, authToken.CodeChallenge, authToken.CodeChallengeMethod); !ok{
+		return nil, fmt.Errorf("Invalid codeVerifier: %w ", err)
+	}
+	client, err := service.clientRepo.GetClientByID(ctx, clientID)
+	if err != nil || client == nil || client.IsActive == false {
+		return nil, fmt.Errorf("Invalid client_id")
+	}
+
 	if authToken.Revoked {
 		return nil, fmt.Errorf("Auth token is revoked")
 	}
@@ -146,8 +155,12 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*AccessTokenClaims, error) {
 	//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMTIzIiwic2Vzc2lvbl9pZCI6Inh4eCIsImV4cCI6MTY5OTk5OTk5OX0.signature
 	// ↑ Header                            ↑ Payload (claims)                  ↑ Signature
-	// 使用·jwt库解析和验证Token
+	// 使用·jwt库解析和验证Token 第三个参数是给一个回调方法去验签,token是使用accessToken解析出的信息去构成的
 	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		//判断是不是对称SHA256加密算法
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected alg: %v", token.Method.Alg())
+		}
 		return []byte(service.secret), nil
 	})
 	if err != nil || !token.Valid {
@@ -188,10 +201,19 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 		if err := accessToken.Validate(); err != nil {
 			return nil, fmt.Errorf("Invalid access token data: %w ", err)
 		}
+		//先revoke当前的
+		accessTokenRecord, err := service.accessTokenRepo.GetTokensByUserID(ctx, claims.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid recorded access token data: %w ", err)
+		}
+		if err := service.accessTokenRepo.RevokeToken(); err != nil {
+			return nil, fmt.Errorf("Cant revoke recorded access token: %w ", err)
+		} 
+		//再发行新的
 		if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
 			return nil, fmt.Errorf("Failed to create access token: %w ", err)
 		}
-
+		
 	}
 	return accessToken, nil
 }
@@ -236,4 +258,19 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 
 func (service *AuthService) Logout(ctx context.Context, sessionID string) error {
 	return service.sessionServce.RevokeSession(ctx, sessionID)
+}
+
+
+
+func verifyPKCE(verifier string, challenge string, method string) bool {
+	switch method {
+	case "S256":
+		sum := sha256.Sum256([]byte(verifier))
+		// []byte转切片 sum[0:]
+		expected := base64.RawURLEncoding.EncodeToString(sum[0:])
+		return subtle.ConstantTimeCompare([]byte(expected), []byte(challenge)) == 1
+	case "plain":
+		return subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) == 1
+	}
+	return false
 }

@@ -25,6 +25,7 @@ type RefreshTokenRepository interface {
 	GetTokenByID(ctx context.Context, tokenID string) (*RefreshToken, error)
 	RotateToken(ctx context.Context, tokenID string) (*RefreshToken, error)
 	RevokeToken(ctx context.Context, tokenID string) error
+	GetTokensByUserID(ctx context.Context, userID string) (*RefreshToken, error)
 }
 
 var _ AuthTokenRepository = (*DynamoAuthTokenRepository)(nil)

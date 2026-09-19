@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"gin-demo/internal/gateway/middleware"
@@ -53,7 +51,7 @@ func (h *AuthHandler) generateAccessToken(accessToken *repository.AccessToken) (
 		CreatedAt:     accessToken.CreatedAt,
 		Revoked:       accessToken.Revoked,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)), //1小时以后过期
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -72,7 +70,7 @@ func (h *AuthHandler) generateRefreshToken(refreshToken *repository.RefreshToken
 		CreatedAt:      refreshToken.CreatedAt,
 		Revoked:        refreshToken.Revoked,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)), //24小时以后过期
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -159,9 +157,10 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 // POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		ClientID string `json:"client_id" binding:"required"`
-		LoginID  string `json:"login_id" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		ClientID            string `json:"client_id" binding:"required"`
+		LoginID             string `json:"login_id" binding:"required"`
+		Password            string `json:"password" binding:"required"`
+		RedirectURI         string `json:"redirect_uri" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -172,12 +171,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid authorization request is required"})
 		return
 	}
+	if authorizationRequest.ClientID != req.ClientID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the client in cookie and rquest is not equal"})
+		return
+	}
 	session, err := h.authService.Login(c.Request.Context(), req.LoginID, req.Password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID)
+	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge, authorizationRequest.CodeChallengeMethod)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -246,7 +249,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Logout successfully"})
 }
 
 // POST /auth/token
@@ -263,7 +266,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID)
+	accessToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID, req.CodeVerifier)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -385,7 +388,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "user registered successfully"})
-	return
 }
 
 // POST /auth/get_profile
@@ -522,17 +524,4 @@ func validatePKCE(codeChallenge string, method string) error {
 		return fmt.Errorf("invalid code challenge method")
 	}
 	return nil
-}
-
-func verifyPKCE(verifier string, challenge string, method string) bool {
-	switch method {
-	case "S256":
-		sum := sha256.Sum256([]byte(verifier))
-		// []byte转切片 sum[0:]
-		expected := base64.RawURLEncoding.EncodeToString(sum[0:])
-		return subtle.ConstantTimeCompare([]byte(expected), []byte(challenge)) == 1
-	case "plain":
-		return subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) == 1
-	}
-	return false
 }

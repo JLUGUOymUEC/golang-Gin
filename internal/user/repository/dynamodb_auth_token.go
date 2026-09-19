@@ -76,20 +76,22 @@ func (repo *DynamoAuthTokenRepository) GetTokenByID(ctx context.Context, tokenID
 }
 
 func (repo *DynamoAuthTokenRepository) GetTokensByUserID(ctx context.Context, userID string) (*AuthorizeToken, error) {
-	resp, err := repo.client.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: aws.String(repo.tableName),
-		Key: map[string]types.AttributeValue{
-			"user_id": &types.AttributeValueMemberS{Value: userID},
+	resp, err := repo.client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(repo.tableName),
+		IndexName:              aws.String("userID-index"),
+		KeyConditionExpression: aws.String("userID = :user_id"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":userID": &types.AttributeValueMemberS{Value: userID},
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get items: %w ", err)
 	}
-	if resp.Item == nil {
+	if resp.Items == nil || len(resp.Items) > 1 {
 		return nil, fmt.Errorf("No tokens found for user")
 	}
 	var authToken AuthorizeToken
-	err = attributevalue.UnmarshalMap(resp.Item, &authToken)
+	err = attributevalue.UnmarshalMap(resp.Items[0], &authToken)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal tokens: %w ", err)
 	}

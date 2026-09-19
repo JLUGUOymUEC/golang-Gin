@@ -1,2 +1,5 @@
 Gateway:
   Secret: laksjdlkasjdljqlwidq
+  AdminUserIDs: [
+    "admin_12302183" # 后续需要加一个方法，可以设置admin需要设置成 550e8400-e29b-41d4-a716-446655440000 在 user_model里生成的
+  ]
