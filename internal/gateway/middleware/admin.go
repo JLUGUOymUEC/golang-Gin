@@ -33,3 +33,21 @@ func GetCurrentUserID(c *gin.Context) (string, bool) {
 	userID, ok := value.(string) // 类型断言
 	return userID, true
 }
+
+func GetClientID(c *gin.Context) (string, bool) {
+	value, ok := c.Get("client_id") // 从上下文获取id
+	if !ok {
+		return "", false
+	}
+	clientID, ok := value.(string) // 类型断言
+	return clientID, true
+}
+
+func GetSessionID(c *gin.Context) (string, bool) {
+	value, ok := c.Get("session_id")
+	if !ok {
+			return "", false
+	}
+	sessionID, ok := value.(string)
+	return sessionID, true
+}

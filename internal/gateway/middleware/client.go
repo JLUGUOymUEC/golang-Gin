@@ -31,6 +31,10 @@ func ClientMiddleware(ClientService *service.ClientService) gin.HandlerFunc {
 		}
 
 		partsDecoded := strings.SplitN(string(decodedClient), ":", 2)
+		if partsDecoded == nil || len(partsDecoded) != 2 {
+			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid authorization header"})
+			return
+		}
 		client_id := partsDecoded[0]
 		client_secret := partsDecoded[1]
 

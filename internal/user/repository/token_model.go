@@ -40,6 +40,13 @@ func (t *AuthorizeToken) Validate() error {
 	if t.UserID == "" {
 		return fmt.Errorf("UserID is required")
 	}
+	now := time.Now().Unix()
+	if t.TTL <= now {
+		return fmt.Errorf("Token has expired")
+	}
+	if t.RedirectURI == "" {
+		return fmt.Errorf("RedirectURI is required")
+	}
 	return nil
 }
 
@@ -47,12 +54,22 @@ func (t *AccessToken) Validate() error {
 	if t.UserID == "" {
 		return fmt.Errorf("UserID is required")
 	}
+
+	now := time.Now().Unix()
+	if t.TTL <= now {
+		return fmt.Errorf("Token has expired")
+	}
 	return nil
 }
 
 func (t *RefreshToken) Validate() error {
 	if t.UserID == "" {
 		return fmt.Errorf("UserID is required")
+	}
+
+	now := time.Now().Unix()
+	if t.TTL <= now {
+		return fmt.Errorf("Token has expired")
 	}
 	return nil
 }

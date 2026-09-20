@@ -8,6 +8,7 @@ import (
 	"gin-demo/internal/user/repository"
 	"gin-demo/internal/user/service"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -161,7 +162,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		ClientID    string `json:"client_id" binding:"required"`
 		LoginID     string `json:"login_id" binding:"required"`
 		Password    string `json:"password" binding:"required"`
-		RedirectURI string `json:"redirect_uri" binding:"required"`
+		RedirectURI string `json:"redirect_uri" binding:"required"` // "https://client.example.com/cb?foo=bar"
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -174,6 +175,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 	if authorizationRequest.ClientID != req.ClientID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "the client in cookie and rquest is not equal"})
+		return
+	}
+	//保证授权请求中的redirectURI一致
+	if authorizationRequest.RedirectURI != req.RedirectURI {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the redirect_uri in cookie and rquest is not equal"})
+		return
+	}
+	client, err := h.clientService.GetClientByID(c.Request.Context(), req.ClientID)
+	if client.RedirectURI != req.RedirectURI {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the redirect_uri in cookie and client is not equal"})
 		return
 	}
 	session, err := h.authService.Login(c.Request.Context(), req.LoginID, req.Password)
@@ -191,8 +202,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	redirectURL, err := url.Parse(authorizationRequest.RedirectURI) // 把真正的uri拆出来
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	q := redirectURL.Query()
+	q.Set("code", token_id)                    // 通过这个方式把code传给client
+	q.Set("state", authorizationRequest.State) // CSRF防护，原样回传
+	redirectURL.RawQuery = q.Encode()          //先setcookie，再302跳转，浏览器会带上cookie
 	c.SetCookie(authorizationRequestCookie, "", -1, "/auth", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"code": token_id, "session_id": session.SessionID, "expires_in": 300})
+	c.SetCookie("session_id", session.SessionID, 300, "/", "", false, true)
+	c.Redirect(http.StatusFound, redirectURL.String()) // 返回302
 }
 
 func (h *AuthHandler) getAuthorizationRequest(c *gin.Context) (*authorizationRequestClaims, error) {
@@ -284,6 +305,19 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.GrantType != "authorization_code" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid grant_type"})
+		return
+	}
+	clientID, ok := middleware.GetClientID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	if clientID != req.ClientID {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "client_id error"})
+		return
+	}
 	accessToken, session_id, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID, req.CodeVerifier)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -320,7 +354,13 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken)
+	sessionID, ok := middleware.GetSessionID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	//防止重放攻击，需要先revoke当前的refreshtoken
+	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, sessionID)
 	if err != nil {
 		// refresh token 不存在/已撤销/并发竞争失败都归为 401，不是服务端错误
 		if errors.Is(err, service.ErrRefreshTokenInvalid) {
@@ -347,6 +387,11 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if err = h.accountService.SessionService.BindTokens(c.Request.Context(), sessionID, accessToken.AccessTokenID, newRefreshToken.RefreshTokenID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": newRefreshTokenString, "expires_in": 86400})
 }
 
