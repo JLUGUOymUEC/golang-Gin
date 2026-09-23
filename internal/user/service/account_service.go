@@ -28,11 +28,7 @@ func NewAccountService(userRepo repository.UserRepository, sessionService *Sessi
 	}
 }
 
-
 func (service *AccountService) Register(ctx context.Context, user *repository.User, password string) error {
-	if err := user.Validate(); err != nil {
-		return fmt.Errorf("Invalid user data: %w", err)
-	}
 	user.BeforeCreate()
 	existedUser, err := service.userRepo.GetUserByUsername(ctx, user.Username)
 	if existedUser != nil {
@@ -51,7 +47,9 @@ func (service *AccountService) Register(ctx context.Context, user *repository.Us
 		return fmt.Errorf("Failed to hash password: %w", err)
 	}
 	user.HashedPassword = hashedPassword
-
+	if err := user.Validate(); err != nil {
+		return fmt.Errorf("Invalid user data: %w", err)
+	}
 	err = service.userRepo.CreateUser(ctx, user)
 	if err != nil {
 		return fmt.Errorf("Failed to create user: %w", err)

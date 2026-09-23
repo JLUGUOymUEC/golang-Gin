@@ -76,7 +76,6 @@ func (service *SessionService) DeleteExpiredSessions(ctx context.Context, sessio
 	return nil
 }
 
-
 func (service *SessionService) GetSessionIDsByUserID(ctx context.Context, userID string) ([]string, error) {
 	sessionIDs, err := service.repo.GetSessionIDsByUserID(ctx, userID)
 	if err != nil {
@@ -93,4 +92,12 @@ func (service *SessionService) BindTokens(ctx context.Context, sessionID string,
 		return err
 	}
 	return nil
+}
+
+func (service *SessionService) GetSessionBySessionID(ctx context.Context, sessionID string) (*repository.Session, error) {
+	session, err := service.repo.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get session by session ID: %w", err)
+	}
+	return session, nil
 }

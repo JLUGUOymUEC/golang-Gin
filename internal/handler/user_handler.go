@@ -74,7 +74,6 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// clear cookie
-	c.SetCookie("session_id", "", -1, "/", "", false, true)
+	// c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "delete success"})
 }

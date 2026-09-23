@@ -22,13 +22,15 @@ type Config struct {
 
 type GatewayConfig struct {
 	AdminUserIDs []string `yaml:"AdminUserIDs"`
-	Secret string `yaml:"Secret"`
+	Secret       string   `yaml:"Secret"`
 }
 
 type dependencies struct {
 	authService   *service.AuthService //用于验证bearer jwt的
 	clientService *service.ClientService
+	userService   *service.UserService //AdminMiddleware 用它查 is_admin
 	authHandler   *handler.AuthHandler
+	adminHandler  *handler.AdminHandler
 	clientHandler *handler.ClientHandler
 	userHandler   *handler.UserHandler
 }
@@ -49,41 +51,41 @@ func loadConfigFromYaml(path string) (*Config, error) {
 	return &config, nil
 }
 
-func buildDependecies(context context.Context) (*dependencies, *Config ,error) {
+func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "./configs/config.yaml"
 	}
 	config, err := loadConfigFromYaml(configPath)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 
 	userRepo, err := repository.NewDynamoUserRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 	sessionRepo, err := repository.NewDynamoSessionRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 
 	authTokenRepo, err := repository.NewDynamoAuthTokenRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 	accessTokenRepo, err := repository.NewDynamoAccessTokenRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 	clientRepo, err := repository.NewDynamoClientRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 
 	refreshTokenRepo, err := repository.NewDynamoRefreshTokenRepository(context)
 	if err != nil {
-		return nil,nil, err
+		return nil, nil, err
 	}
 	sessionService := service.NewSessionService(sessionRepo)
 
@@ -92,24 +94,27 @@ func buildDependecies(context context.Context) (*dependencies, *Config ,error) {
 	userService := service.NewUserService(userRepo)
 	accountService := service.NewAccountService(userRepo, sessionService, authService)
 	authHandler := handler.NewAuthHandler(authService, accountService, userService, clientService)
+	adminHandler := handler.NewAdminHandler(authService)
 	clientHandler := handler.NewClientHandler(clientService)
 	userHandler := handler.NewUserHandler(userService)
 
 	return &dependencies{
 		authService:   authService,
 		authHandler:   authHandler,
+		adminHandler:  adminHandler,
 		clientHandler: clientHandler,
 		userHandler:   userHandler,
 		clientService: clientService,
-	}, config,nil
+		userService:   userService,
+	}, config, nil
 }
 
 func Run(ctx context.Context) error {
-	dependencies,config, err := buildDependecies(ctx)
+	dependencies, config, err := buildDependecies(ctx)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
-	router := buildRouter(dependencies , config)
+	router := buildRouter(dependencies, config)
 	if router == nil {
 		return fmt.Errorf("Build router failed")
 	}
@@ -129,7 +134,8 @@ func buildRouter(deps *dependencies, config *Config) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	routes.RegisterClientRoutes(router, deps.clientHandler, deps.authService, config.Gateway.AdminUserIDs)
+	routes.RegisterClientRoutes(router, deps.clientHandler)
+	routes.RegisterAdminRoutes(router, deps.adminHandler, deps.clientHandler, deps.authService, deps.userService, config.Gateway.AdminUserIDs)
 	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService, deps.clientService)
 	return router
 }

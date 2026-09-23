@@ -171,9 +171,10 @@ func (repo *DynamoSessionRepository) BindTokens(ctx context.Context, sessionID s
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":access_token_id": &types.AttributeValueMemberS{Value: accessTokenID},
 				":refresh_token_id": &types.AttributeValueMemberS{Value: refreshTokenID},
+				":false": &types.AttributeValueMemberBOOL{Value: false},//用false之前需要定义
 			},
-			ConditionExpression: aws.String("attribute_exists(session_id)"),			
-			},
+			ConditionExpression: aws.String("attribute_exists(session_id) AND revoked = :false"),//
+			},//防止在session被撤销时还把tokne绑定上去
 	)
 	if err != nil {
 		return fmt.Errorf("Failed to bind tokens: %w", err)

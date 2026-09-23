@@ -14,7 +14,7 @@ func HashPassword(password string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Failed to hash password: %w ", err)
 	}
-	return fmt.Sprintf("%x", hashedPassword), nil
+	return string(hashedPassword), nil // 已经是字符串了，不要再进行十六进制编码，直接存
 }
 
 

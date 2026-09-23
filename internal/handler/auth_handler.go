@@ -46,42 +46,14 @@ func NewAuthHandler(authService *service.AuthService, accountService *service.Ac
 	}
 }
 
+// 签发逻辑放在 service（SignAccessToken / SignRefreshToken），
+// 因为 /admin/login 也要用同一套。这里保留薄封装，避免改动所有调用点。
 func (h *AuthHandler) generateAccessToken(accessToken *repository.AccessToken) (string, error) {
-	claims := service.AccessTokenClaims{
-		AccessTokenID: accessToken.AccessTokenID,
-		UserID:        accessToken.UserID,
-		CreatedAt:     accessToken.CreatedAt,
-		Revoked:       accessToken.Revoked,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)), //1小时以后过期
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
-	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := tokenClaims.SignedString([]byte(h.authService.GetSecretKey()))
-	if err != nil {
-		return "", err
-	}
-	return tokenString, nil
+	return h.authService.SignAccessToken(accessToken)
 }
 
 func (h *AuthHandler) generateRefreshToken(refreshToken *repository.RefreshToken) (string, error) {
-	claims := service.RefreshTokenClaims{
-		RefreshTokenID: refreshToken.RefreshTokenID,
-		UserID:         refreshToken.UserID,
-		CreatedAt:      refreshToken.CreatedAt,
-		Revoked:        refreshToken.Revoked,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)), //24小时以后过期
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
-	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := tokenClaims.SignedString([]byte(h.authService.GetSecretKey()))
-	if err != nil {
-		return "", err
-	}
-	return tokenString, nil
+	return h.authService.SignRefreshToken(refreshToken)
 }
 
 func (h *AuthHandler) generateAuthToken(authToken *repository.AuthorizeToken) (string, error) {
@@ -183,6 +155,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	client, err := h.clientService.GetClientByID(c.Request.Context(), req.ClientID)
+	if err != nil || client == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid client id"})
+		return
+	}
 	if client.RedirectURI != req.RedirectURI {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "the redirect_uri in cookie and client is not equal"})
 		return
@@ -208,11 +184,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	q := redirectURL.Query()
-	q.Set("code", token_id)                    // 通过这个方式把code传给client
-	q.Set("state", authorizationRequest.State) // CSRF防护，原样回传
-	redirectURL.RawQuery = q.Encode()          //先setcookie，再302跳转，浏览器会带上cookie
-	c.SetCookie(authorizationRequestCookie, "", -1, "/auth", "", false, true)
-	c.SetCookie("session_id", session.SessionID, 300, "/", "", false, true)
+	q.Set("code", token_id)                                                   // 通过这个方式把code传给client
+	q.Set("state", authorizationRequest.State)                                // CSRF防护，原样回传
+	redirectURL.RawQuery = q.Encode()                                         //先setcookie，再302跳转，浏览器会带上cookie
+	c.SetCookie(authorizationRequestCookie, "", -1, "/auth", "", false, true) //先清空
+	// c.SetCookie("session_id", session.SessionID, 86400, "/", "", true, true) //设置sesison_id到cookie 保留24小时，session_id每次请求带上，不存了
 	c.Redirect(http.StatusFound, redirectURL.String()) // 返回302
 }
 
@@ -283,8 +259,8 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	// 撤销该用户全部凭证：access token + refresh token + session
-	if err := h.authService.RevokeAllUserCredentials(c.Request.Context(), userID); err != nil {
+	// 撤销该用户当前session的凭证：access token + refresh token + session
+	if err := h.authService.RevokeSessionCredentials(c.Request.Context(), req.SessionID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -342,23 +318,27 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "expires_in": 86400})
+	//expires_in: 3600 代表 1 小时后过期,只描述access_token的有效期限
+	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "session_id": session_id, "expires_in": 3600})
 }
 
 // POST /auth/refresh
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
+		SessionID    string `json:"session_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	sessionID, ok := middleware.GetSessionID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
+	sessionID := req.SessionID
+	// 不要本地的了，移动端可能没有cookie
+	// sessionID, ok := middleware.GetSessionID(c)
+	// if !ok {
+	// 	c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	// 	return
+	// }
 	//防止重放攻击，需要先revoke当前的refreshtoken
 	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, sessionID)
 	if err != nil {
@@ -392,7 +372,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": newRefreshTokenString, "expires_in": 86400})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": newRefreshTokenString, "expires_in": 3600})
 }
 
 // POST /auth/revoke
@@ -417,7 +397,7 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 			return
 		}
 	}
-	c.SetCookie("session_id", "", -1, "/", "", false, true)
+	// c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
 
 }
@@ -560,9 +540,8 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.SetCookie("session_id", "", -1, "/", "", false, true)
+	// c.SetCookie("session_id", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"message": "Change Password successfully"})
-	return
 }
 
 // private function

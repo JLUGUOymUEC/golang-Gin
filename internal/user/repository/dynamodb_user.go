@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/goccy/go-yaml"
 )
 
 type DynamoUserRepository struct {
@@ -18,8 +20,26 @@ type DynamoUserRepository struct {
 	tableName string
 }
 
+type Config struct {
+	AWSConfig `yaml:"AWSConfig"`
+}
+
+type AWSConfig struct {
+	Region  string `yaml:"region"`
+	Profile string `yaml:"profile"`
+}
+
 func NewDynamoDBConfig(ctx context.Context) (*dynamodb.Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("ap-northeast-1"))
+	data, err := os.ReadFile("./internal/user/repository/config.yaml")
+	if err != nil {
+		return nil, err
+	}
+	var regionConfig Config
+	err = yaml.Unmarshal(data, &regionConfig)
+	if regionConfig.Region == "" || err != nil {
+		regionConfig.Region = "ap-northeast-1" // 默认区域
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(regionConfig.Region))
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +91,7 @@ func (repo *DynamoUserRepository) GetUserByID(ctx context.Context, userID string
 			TableName: aws.String(repo.tableName),
 
 			ProjectionExpression: aws.String(
-				"user_id, username, hashed_password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, is_admin, created_at, updated_at",
 			),
 
 			Key: map[string]types.AttributeValue{
@@ -106,9 +126,9 @@ func (repo *DynamoUserRepository) GetUserByUsername(ctx context.Context, usernam
 		&dynamodb.QueryInput{
 			TableName:              aws.String(repo.tableName),
 			KeyConditionExpression: aws.String("username = :userName"),
-			IndexName: aws.String("username-index"), // 需要 "username-index" 的全局二级索引
+			IndexName:              aws.String("username-index"), // 需要 "username-index" 的全局二级索引
 			ProjectionExpression: aws.String(
-				"user_id, username, hashed_password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, is_admin, created_at, updated_at",
 			),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":userName": &types.AttributeValueMemberS{
@@ -249,8 +269,8 @@ func (repo *DynamoUserRepository) GetUserByEmail(ctx context.Context, email stri
 	resp, err := repo.client.Query(
 		ctx,
 		&dynamodb.QueryInput{
-			TableName: aws.String(repo.tableName),
-			IndexName: aws.String("email-index"), // 需要 "email-index" 的全局二级索引
+			TableName:              aws.String(repo.tableName),
+			IndexName:              aws.String("email-index"), // 需要 "email-index" 的全局二级索引
 			KeyConditionExpression: aws.String("email = :email"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":email": &types.AttributeValueMemberS{
@@ -258,7 +278,7 @@ func (repo *DynamoUserRepository) GetUserByEmail(ctx context.Context, email stri
 				},
 			},
 			ProjectionExpression: aws.String(
-				"user_id, username, hashed_password, email, created_at, updated_at",
+				"user_id, username, hashed_password, email, is_admin, created_at, updated_at",
 			),
 		},
 	)

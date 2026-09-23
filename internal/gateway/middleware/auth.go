@@ -36,11 +36,4 @@ func AuthMiddleware(AuthService *service.AuthService) gin.HandlerFunc {
 	}
 }
 
-// func GetCurrentUserID(c *gin.Context) (string, bool) {
-// 	value, ok := c.Get("user_id") // 从上下文获取id
-// 	if !ok {
-// 		return "", false
-// 	}
-// 	userID, ok := value.(string) // 类型断言
-// 	return userID, true
-// }
+
