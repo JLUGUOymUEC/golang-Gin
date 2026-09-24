@@ -42,7 +42,7 @@ func (repo *DynamoAccessTokenRepository) CreateToken(ctx context.Context, token 
 		&dynamodb.PutItemInput{
 			TableName:           aws.String(repo.tableName),
 			Item:                item,
-			ConditionExpression: aws.String("attributes_not_exists(access_token_id)"),
+			ConditionExpression: aws.String("attribute_not_exists(access_token_id)"),
 		})
 	if err != nil {
 		return fmt.Errorf("Failed to put item: %w", err)
