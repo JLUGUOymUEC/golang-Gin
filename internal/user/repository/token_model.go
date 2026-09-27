@@ -18,6 +18,8 @@ type AuthorizeToken struct {
 	CodeChallengeMethod string `dynamodbav:"code_challenge_method"`
 	RedirectURI         string `dynamodbav:"redirect_uri"`
 	SessionID           string `dynamodbav:"session_id"`
+	Nonece              string `dynamodbav:"nonce"`
+	Scope               string `dynamodbav:"scope"`
 }
 
 type AccessToken struct {

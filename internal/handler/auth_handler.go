@@ -168,7 +168,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge, authorizationRequest.CodeChallengeMethod, session.SessionID)
+	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge,
+													 authorizationRequest.CodeChallengeMethod, session.SessionID, authorizationRequest.Nonce, authorizationRequest.Scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

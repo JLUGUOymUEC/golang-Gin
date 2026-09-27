@@ -154,7 +154,7 @@ func (service *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken
 	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
-func (service *AuthService) CreateAuthToken(ctx context.Context, userID string, redirectURI string, clientID string, codeChallenge string, codeChallengeMethod string, sessionID string) (*repository.AuthorizeToken, error) {
+func (service *AuthService) CreateAuthToken(ctx context.Context, userID string, redirectURI string, clientID string, codeChallenge string, codeChallengeMethod string, sessionID string, nonce string, scope string) (*repository.AuthorizeToken, error) {
 	authToken := &repository.AuthorizeToken{
 		UserID:              userID,
 		RedirectURI:         redirectURI,

@@ -21,8 +21,11 @@ type Config struct {
 }
 
 type GatewayConfig struct {
-	AdminUserIDs []string `yaml:"AdminUserIDs"`
-	Secret       string   `yaml:"Secret"`
+	AdminUserIDs          []string `yaml:"AdminUserIDs"`
+	Secret                string   `yaml:"Secret"`
+	Issuer                string   `yaml:"Issuer"`                // 如 http://localhost:8080
+	IDTokenPrivateKeyPath string   `yaml:"IDTokenPrivateKeyPath"` // PEM 路径
+	IDTokenKeyID          string   `yaml:"IDTokenKeyID"`          // kid，JWKS 要用
 }
 
 type dependencies struct {
@@ -42,11 +45,12 @@ func loadConfigFromYaml(path string) (*Config, error) {
 	}
 	var config Config
 	err = yaml.Unmarshal(data, &config)
-	if config.Gateway.Secret == "" {
-		return nil, errors.New("secret is required")
-	}
+
 	if err != nil {
 		return nil, err
+	}
+	if config.Gateway.Secret == "" {
+		return nil, errors.New("secret is required")
 	}
 	return &config, nil
 }
