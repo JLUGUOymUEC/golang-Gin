@@ -175,30 +175,30 @@ func (service *AuthService) CreateAuthToken(ctx context.Context, userID string, 
 	return authToken, nil //handler里要把token转为字符串返回给客户端
 }
 
-func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string, codeVerifier string) (*repository.AccessToken, string, error) {
+func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID string, RedirectURI string, clientID string, codeVerifier string) (*repository.AccessToken, *repository.AuthorizeToken, error) {
 
 	authToken, err := service.authTokenRepo.GetTokenByID(ctx, authTokenID)
 	if err != nil {
-		return nil, "", fmt.Errorf("Failed to get auth token: %w ", err)
+		return nil, nil, fmt.Errorf("Failed to get auth token: %w ", err)
 	}
 	if err = authToken.Validate(); err != nil {
-		return nil, "", fmt.Errorf("Invalid auth token: %w ", err)
+		return nil, nil, fmt.Errorf("Invalid auth token: %w ", err)
 	}
 	if ok := verifyPKCE(codeVerifier, authToken.CodeChallenge, authToken.CodeChallengeMethod); !ok {
-		return nil, "", fmt.Errorf("Invalid codeVerifier: %w ", err)
+		return nil, nil, fmt.Errorf("Invalid codeVerifier: %w ", err)
 	}
 	client, err := service.clientRepo.GetClientByID(ctx, clientID)
 	if err != nil || client == nil || client.IsActive == false {
-		return nil, "", fmt.Errorf("Invalid client_id")
+		return nil, nil, fmt.Errorf("Invalid client_id")
 	}
 	if authToken.ClientID != clientID {
-		return nil, "", fmt.Errorf("Client ID does not match")
+		return nil, nil, fmt.Errorf("Client ID does not match")
 	}
 	if authToken.Revoked {
-		return nil, "", fmt.Errorf("Auth token is revoked")
+		return nil, nil, fmt.Errorf("Auth token is revoked")
 	}
 	if authToken.RedirectURI != RedirectURI {
-		return nil, "", fmt.Errorf("Redirect URI does not match")
+		return nil, nil, fmt.Errorf("Redirect URI does not match")
 	}
 	accessToken := &repository.AccessToken{
 		UserID:  authToken.UserID,
@@ -206,15 +206,16 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	}
 	accessToken.BeforeCreate()
 	if err := accessToken.Validate(); err != nil {
-		return nil, "", fmt.Errorf("Invalid access token data: %w ", err)
+		return nil, nil, fmt.Errorf("Invalid access token data: %w ", err)
 	}
 	if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
-		return nil, "", fmt.Errorf("Failed to create access token: %w ", err)
+		return nil, nil, fmt.Errorf("Failed to create access token: %w ", err)
 	}
+
 	if err := service.authTokenRepo.RevokeToken(ctx, authTokenID); err != nil {
-		return nil, "", fmt.Errorf("Failed to revoke access token: %w ", err)
+		return nil, nil, fmt.Errorf("Failed to revoke access token: %w ", err)
 	}
-	return accessToken, authToken.SessionID, nil
+	return accessToken, authToken, nil
 }
 
 func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken string) (*AccessTokenClaims, error) {
@@ -338,6 +339,7 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 }
 
 // AdminLogin 校验管理员凭证后，直接签发一套 token（不经过授权码流程）。
+//
 //	建 client 需要 access token，拿 access token 需要 client
 //
 // 而这条路径只要 Users 表里有一行 is_admin = true，不需要任何已存在的 client。

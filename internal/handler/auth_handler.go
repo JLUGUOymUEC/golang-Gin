@@ -22,27 +22,29 @@ type AuthHandler struct {
 	accountService *service.AccountService
 	userService    *service.UserService
 	clientService  *service.ClientService
+	idtokenIssuer  *service.IDTokenIssuer
 }
 
 const authorizationRequestCookie = "oidc_authorization_request"
 
 type authorizationRequestClaims struct {
-	ClientID            string `json:"client_id"`
-	RedirectURI         string `json:"redirect_uri"`
-	Scope               string `json:"scope"`
-	State               string `json:"state,omitempty"`
-	Nonce               string `json:"nonce,omitempty"`
-	CodeChallenge       string `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
+	ClientID            string   `json:"client_id"`
+	RedirectURI         string   `json:"redirect_uri"`
+	Scopes               []string `json:"scope"`
+	State               string   `json:"state,omitempty"`
+	Nonce               string   `json:"nonce,omitempty"`
+	CodeChallenge       string   `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string   `json:"code_challenge_method,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService, idTokenIssuer *service.IDTokenIssuer) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		accountService: accountService,
 		userService:    userService,
 		clientService:  clientService,
+		idtokenIssuer:  idTokenIssuer,
 	}
 }
 
@@ -169,7 +171,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge,
-													 authorizationRequest.CodeChallengeMethod, session.SessionID, authorizationRequest.Nonce, authorizationRequest.Scope)
+		authorizationRequest.CodeChallengeMethod, session.SessionID, authorizationRequest.Nonce, authorizationRequest.Scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -273,7 +275,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
 		GrantType    string `json:"grant_type" binding:"required"`
 		ClientID     string `json:"client_id" binding:"required"`
-		AuthToken    string `json:"code" binding:"required"`
+		AuthTokenID  string `json:"code" binding:"required"`
 		RedirectURI  string `json:"redirect_uri" binding:"required"`
 		ClientSecret string `json:"client_secret" `
 		CodeVerifier string `json:"code_verifier" `
@@ -295,7 +297,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "client_id error"})
 		return
 	}
-	accessToken, session_id, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthToken, req.RedirectURI, req.ClientID, req.CodeVerifier)
+	accessToken, authToken, err := h.authService.ExchangeAuthToken(c.Request.Context(), req.AuthTokenID, req.RedirectURI, req.ClientID, req.CodeVerifier)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -315,12 +317,22 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err = h.accountService.SessionService.BindTokens(c.Request.Context(), session_id, accessToken.AccessTokenID, refreshToken.RefreshTokenID); err != nil {
+	if err = h.accountService.SessionService.BindTokens(c.Request.Context(), authToken.SessionID, accessToken.AccessTokenID, refreshToken.RefreshTokenID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	user, err := h.userService.GetUserByID(c.Request.Context(), accessToken.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	idToken, err := h.idtokenIssuer.SignIDToken(user, req.ClientID, authToken.Scope, authToken.Nonce, time.Now().Add(time.Hour))
 	//expires_in: 3600 代表 1 小时后过期,只描述access_token的有效期限
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "session_id": session_id, "expires_in": 3600})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "session_id": authToken.SessionID, "expires_in": 3600})
 }
 
 // POST /auth/refresh
