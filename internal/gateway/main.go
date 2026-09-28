@@ -96,7 +96,12 @@ func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, clientRepo, config.Gateway.Secret)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
-	idTokenIssuer, err := service.NewIDTokenIssuer(config.Gateway.IDTokenPrivateKeyPath, config.Gateway.Issuer, config.Gateway.IDTokenKeyID)
+	idTokenIssuerConfig := service.IDTokenIssuerConfig{
+		PrivateKeyPath: config.Gateway.IDTokenPrivateKeyPath,
+		KeyID:          config.Gateway.IDTokenKeyID,
+		Issuer:         config.Gateway.Issuer,
+	}
+	idTokenIssuer, err := service.NewIDTokenIssuer(idTokenIssuerConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to create IDTokenIssuer: %w", err)
 	}

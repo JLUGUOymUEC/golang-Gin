@@ -30,7 +30,7 @@ const authorizationRequestCookie = "oidc_authorization_request"
 type authorizationRequestClaims struct {
 	ClientID            string   `json:"client_id"`
 	RedirectURI         string   `json:"redirect_uri"`
-	Scopes               []string `json:"scope"`
+	Scopes              []string `json:"scope"`
 	State               string   `json:"state,omitempty"`
 	Nonce               string   `json:"nonce,omitempty"`
 	CodeChallenge       string   `json:"code_challenge,omitempty"`
@@ -73,7 +73,7 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 		ResponseType        string `form:"response_type" binding:"required"`
 		ClientID            string `form:"client_id" binding:"required"`
 		RedirectURI         string `form:"redirect_uri" binding:"required"`
-		Scope               string `form:"scope" binding:"required"`
+		Scopes              string `form:"scope" binding:"required"`
 		State               string `form:"state"`
 		Nonce               string `form:"nonce"`
 		CodeChallenge       string `form:"code_challenge"`
@@ -97,7 +97,8 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri does not match client registration"})
 		return
 	}
-	requestedScopes := strings.Fields(req.Scope)
+	requestedScopes := strings.Fields(req.Scopes)
+	//只强制要求openid
 	if !containsScope(requestedScopes, "openid") || !scopesAllowed(requestedScopes, client.AllowedScopes) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 		return
@@ -110,7 +111,7 @@ func (h *AuthHandler) Authorize(c *gin.Context) {
 	claims := authorizationRequestClaims{
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
-		Scope:               req.Scope,
+		Scopes:              requestedScopes,
 		State:               req.State,
 		Nonce:               req.Nonce,
 		CodeChallenge:       req.CodeChallenge,
@@ -171,7 +172,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	authToken, err := h.authService.CreateAuthToken(c.Request.Context(), session.UserID, authorizationRequest.RedirectURI, authorizationRequest.ClientID, authorizationRequest.CodeChallenge,
-		authorizationRequest.CodeChallengeMethod, session.SessionID, authorizationRequest.Nonce, authorizationRequest.Scope)
+		authorizationRequest.CodeChallengeMethod, session.SessionID, authorizationRequest.Nonce, authorizationRequest.Scopes)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -330,9 +331,18 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	idToken, err := h.idtokenIssuer.SignIDToken(user, req.ClientID, authToken.Scope, authToken.Nonce, time.Now().Add(time.Hour))
+	session, err := h.accountService.SessionService.GetSessionBySessionID(c.Request.Context(), authToken.SessionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	idToken, err := h.idtokenIssuer.SignIDToken(user, req.ClientID, authToken.Scopes, authToken.Nonce, session.CreatedAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	//expires_in: 3600 代表 1 小时后过期,只描述access_token的有效期限
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "session_id": authToken.SessionID, "expires_in": 3600})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "id_token": idToken, "session_id": authToken.SessionID, "expires_in": 3600})
 }
 
 // POST /auth/refresh

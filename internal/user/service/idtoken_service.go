@@ -14,9 +14,16 @@ import (
 )
 
 type IDTokenIssuer struct {
-	issuer     string
-	keyID      string
-	privateKey *rsa.PrivateKey
+	issuer         string
+	keyID          string
+	privateKey     *rsa.PrivateKey
+	SessionService *SessionService
+}
+
+type IDTokenIssuerConfig struct {
+	Issuer         string
+	KeyID          string
+	PrivateKeyPath string
 }
 
 type IDTokenClaims struct {
@@ -29,14 +36,14 @@ type IDTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewIDTokenIssuer(issuer, keyID, privateKeyPath string) (*IDTokenIssuer, error) {
-	privateKey, err := loadPrivateKey(privateKeyPath)
+func NewIDTokenIssuer(cfg IDTokenIssuerConfig) (*IDTokenIssuer, error) {
+	privateKey, err := loadPrivateKey(cfg.PrivateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load private key: %w", err)
 	}
 	return &IDTokenIssuer{
-		issuer:     issuer,
-		keyID:      keyID,
+		issuer:     cfg.Issuer,
+		keyID:      cfg.KeyID,
 		privateKey: privateKey,
 	}, nil
 }
@@ -46,13 +53,17 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	block, _ := pem.Decode(data) // 解码 PEM 格式的私钥，block形式的结构体中bytes字段就是私钥的字节流
-	if block == nil || block.Type != "RSA PRIVATE KEY" {
+	block, _ := pem.Decode(data)                     // 解码 PEM 格式的私钥，block形式的结构体中bytes字段就是私钥的字节流
+	if block == nil || block.Type != "PRIVATE KEY" { // 检查PKCS#8 格式
 		return nil, errors.New("failed to decode PEM block containing private key")
 	}
-	rsaKey, err := x509.ParsePKCS1PrivateKey(block.Bytes) // 解析 PKCS#1 格式的 RSA 私钥
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes) // 解析 PKCS#8 格式的 RSA 私钥 现在的格式是PKCS#8
 	if err != nil {
 		return nil, err
+	}
+	rsaKey, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("private key is not an RSA key")
 	}
 	return rsaKey, nil
 }
@@ -67,11 +78,12 @@ func contains(slice []string, item string) bool {
 }
 
 func (i *IDTokenIssuer) SignIDToken(user *repository.User, clientID string, scopes []string, nonce string, authTime int64) (string, error) {
+
 	claims := i.buildClaims(user, clientID, scopes, nonce, authTime)
-	if !contains(scopes, "profile") {
-		return "", errors.New("profile is required for the requested scopes")
-	}
-	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(i.privateKey) //基于私钥签名的idtoken claims，返回签名后的token字符串
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = i.keyID //设置头部key id
+
+	return tok.SignedString(i.privateKey) //基于私钥签名的idtoken claims，返回签名后的token字符串
 }
 
 func (i *IDTokenIssuer) buildClaims(user *repository.User, clientID string, scopes []string, nonce string, authTime int64) IDTokenClaims {
@@ -80,11 +92,11 @@ func (i *IDTokenIssuer) buildClaims(user *repository.User, clientID string, scop
 		AuthTime: authTime,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    i.issuer,
-			Subject:   user.UserID,                                       //唯一标识
-			Audience:  jwt.ClaimStrings{clientID},                        //客户端id
-			IssuedAt:  jwt.NewNumericDate(time.Now()),                    //签发时间
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 1)), //过期时间
-			NotBefore: jwt.NewNumericDate(time.Now()),                    //生效时间
+			Subject:   user.UserID,                                           //唯一标识
+			Audience:  jwt.ClaimStrings{clientID},                            //客户端id
+			IssuedAt:  jwt.NewNumericDate(time.Now()),                        //签发时间
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 1)),     //过期时间
+			NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Second * 20)), //生效时间
 		},
 	}
 	if contains(scopes, "email") {
