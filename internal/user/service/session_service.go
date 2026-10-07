@@ -15,7 +15,7 @@ func NewSessionService(repo repository.SessionRepository) *SessionService {
 	return &SessionService{repo: repo}
 }
 
-func (service *SessionService) CreateSession(ctx context.Context, userID string) (*repository.Session, error) {
+func (service *SessionService) CreateSession(ctx context.Context, userID string, clientID string, scopes []string) (*repository.Session, error) {
 	session := &repository.Session{
 		SessionID: repository.GenerateSessionID(),
 		UserID:    userID,
@@ -23,6 +23,8 @@ func (service *SessionService) CreateSession(ctx context.Context, userID string)
 		ExpiredAt: time.Now().Add(24 * time.Hour).Unix(), //默认过期时间24小时,回来改成configurable,可以不停机更新
 		Revoked:   false,
 		TTL:       time.Now().Add(24 * time.Hour).Unix(), //设置TTL字段，自动删除过期数据
+		ClientID:  clientID,
+		Scopes:    scopes,
 	}
 	err := session.Validate()
 	if err != nil {

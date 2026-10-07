@@ -107,8 +107,9 @@ func (repo *DynamoAuthTokenRepository) RevokeToken(ctx context.Context, tokenID 
 		UpdateExpression: aws.String("SET revoked = :revoked"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":revoked": &types.AttributeValueMemberBOOL{Value: true},
+			":false":   &types.AttributeValueMemberBOOL{Value: false},
 		},
-		ConditionExpression: aws.String("attribute_exists(auth_token_id)"),
+		ConditionExpression: aws.String("attribute_exists(auth_token_id) AND revoked = :false"),
 	})
 	if err != nil {
 		return fmt.Errorf("Failed to revoke token: %w ", err)

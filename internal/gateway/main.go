@@ -11,6 +11,7 @@ import (
 	"gin-demo/internal/user/service"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
@@ -21,11 +22,13 @@ type Config struct {
 }
 
 type GatewayConfig struct {
-	AdminUserIDs          []string `yaml:"AdminUserIDs"`
-	Secret                string   `yaml:"Secret"`
-	Issuer                string   `yaml:"Issuer"`                // 如 http://localhost:8080
-	IDTokenPrivateKeyPath string   `yaml:"IDTokenPrivateKeyPath"` // PEM 路径
-	IDTokenKeyID          string   `yaml:"IDTokenKeyID"`          // kid，JWKS 要用
+	AdminUserIDs              []string `yaml:"AdminUserIDs"`
+	Secret                    string   `yaml:"Secret"`
+	Issuer                    string   `yaml:"Issuer"`                    // 如 http://localhost:8080
+	IDTokenPrivateKeyPath     string   `yaml:"IDTokenPrivateKeyPath"`     // PEM 路径
+	IDTokenKeyID              string   `yaml:"IDTokenKeyID"`              // kid，JWKS 要用
+	AccessTokenPrivateKeyPath string   `yaml:"AccessTokenPrivateKeyPath"` // PEM 路径
+	AccessTokenKeyID          string   `yaml:"AccessTokenKeyID"`
 }
 
 type dependencies struct {
@@ -36,6 +39,18 @@ type dependencies struct {
 	adminHandler  *handler.AdminHandler
 	clientHandler *handler.ClientHandler
 	userHandler   *handler.UserHandler
+	oidcHandler   *handler.OIDCHandler
+}
+
+type AuthServiceConfig struct {
+	UserRepo         repository.UserRepository
+	SessionService   *service.SessionService
+	AuthTokenRepo    repository.AuthTokenRepository
+	AccessTokenRepo  repository.AccessTokenRepository
+	RefreshTokenRepo repository.RefreshTokenRepository
+	ClientRepo       repository.ClientRepository
+	Secret           string // 仍用于 refresh token + authorize cookie
+	AccessTokenKey   *service.SigningKey
 }
 
 func loadConfigFromYaml(path string) (*Config, error) {
@@ -52,6 +67,7 @@ func loadConfigFromYaml(path string) (*Config, error) {
 	if config.Gateway.Secret == "" {
 		return nil, errors.New("secret is required")
 	}
+	config.Gateway.Issuer = strings.TrimRight(config.Gateway.Issuer, "/") // 去除末尾斜杠
 	return &config, nil
 }
 
@@ -92,25 +108,35 @@ func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 		return nil, nil, err
 	}
 	sessionService := service.NewSessionService(sessionRepo)
-
-	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, clientRepo, config.Gateway.Secret)
+	accessTokenConfig := service.TokenIssuerConfig{
+		PrivateKeyPath: config.Gateway.AccessTokenPrivateKeyPath,
+		KeyID:          config.Gateway.AccessTokenKeyID,
+		Issuer:         config.Gateway.Issuer,
+	}
+	accessTokenIssuer, err := service.NewSigningKey(accessTokenConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to create SigningKey: %w", err)
+	}
+	authService := service.NewAuthService(userRepo, sessionService, authTokenRepo, accessTokenRepo, refreshTokenRepo, clientRepo, config.Gateway.Secret, accessTokenIssuer)
 	clientService := service.NewClientService(clientRepo)
 	userService := service.NewUserService(userRepo)
-	idTokenIssuerConfig := service.IDTokenIssuerConfig{
+
+	idTokenIssuerConfig := service.TokenIssuerConfig{
 		PrivateKeyPath: config.Gateway.IDTokenPrivateKeyPath,
 		KeyID:          config.Gateway.IDTokenKeyID,
 		Issuer:         config.Gateway.Issuer,
 	}
-	idTokenIssuer, err := service.NewIDTokenIssuer(idTokenIssuerConfig)
+	idTokenIssuer, err := service.NewSigningKey(idTokenIssuerConfig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create IDTokenIssuer: %w", err)
+		return nil, nil, fmt.Errorf("Failed to create SigningKey: %w", err)
 	}
 	accountService := service.NewAccountService(userRepo, sessionService, authService)
 	authHandler := handler.NewAuthHandler(authService, accountService, userService, clientService, idTokenIssuer)
-	adminHandler := handler.NewAdminHandler(authService)
+	adminHandler := handler.NewAdminHandler(authService, sessionService)
 	clientHandler := handler.NewClientHandler(clientService)
 	userHandler := handler.NewUserHandler(userService)
 
+	oidcHandler := handler.NewOIDCHandler(config.Gateway.Issuer, idTokenIssuer)
 	return &dependencies{
 		authService:   authService,
 		authHandler:   authHandler,
@@ -119,6 +145,7 @@ func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 		userHandler:   userHandler,
 		clientService: clientService,
 		userService:   userService,
+		oidcHandler:   oidcHandler,
 	}, config, nil
 }
 
@@ -150,5 +177,6 @@ func buildRouter(deps *dependencies, config *Config) *gin.Engine {
 	routes.RegisterClientRoutes(router, deps.clientHandler)
 	routes.RegisterAdminRoutes(router, deps.adminHandler, deps.clientHandler, deps.authService, deps.userService, config.Gateway.AdminUserIDs)
 	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService, deps.clientService)
+	routes.RegisterOIDCRoutes(router, deps.oidcHandler)
 	return router
 }

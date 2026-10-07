@@ -22,7 +22,7 @@ type AuthHandler struct {
 	accountService *service.AccountService
 	userService    *service.UserService
 	clientService  *service.ClientService
-	idtokenIssuer  *service.IDTokenIssuer
+	idtokenIssuer  *service.SigningKey
 }
 
 const authorizationRequestCookie = "oidc_authorization_request"
@@ -38,7 +38,7 @@ type authorizationRequestClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService, idTokenIssuer *service.IDTokenIssuer) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, accountService *service.AccountService, userService *service.UserService, clientService *service.ClientService, idTokenIssuer *service.SigningKey) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		accountService: accountService,
@@ -166,7 +166,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "the redirect_uri in cookie and client is not equal"})
 		return
 	}
-	session, err := h.authService.Login(c.Request.Context(), req.LoginID, req.Password)
+	session, err := h.authService.Login(c.Request.Context(), req.LoginID, req.Password, req.ClientID, authorizationRequest.Scopes)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -272,17 +272,17 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 // POST /auth/token
+// 规定需要可以接收json和form两种格式的请求体，json是移动端，form是web端
 func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
 		GrantType    string `json:"grant_type" binding:"required"`
 		ClientID     string `json:"client_id" binding:"required"`
 		AuthTokenID  string `json:"code" binding:"required"`
 		RedirectURI  string `json:"redirect_uri" binding:"required"`
-		ClientSecret string `json:"client_secret" `
 		CodeVerifier string `json:"code_verifier" `
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": err.Error()})
 		return
 	}
 	if req.GrantType != "authorization_code" {
@@ -328,7 +328,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't find user by ids"})
 		return
 	}
 	session, err := h.accountService.SessionService.GetSessionBySessionID(c.Request.Context(), authToken.SessionID)
@@ -336,7 +336,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	idToken, err := h.idtokenIssuer.SignIDToken(user, req.ClientID, authToken.Scopes, authToken.Nonce, session.CreatedAt)
+	idToken, err := h.idtokenIssuer.SignIDToken(user, clientID, authToken.Scopes, authToken.Nonce, session.CreatedAt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -346,13 +346,14 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 }
 
 // POST /auth/refresh
+// 规定需要可以接收json和form两种格式的请求体，json是移动端，form是web端
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
 		SessionID    string `json:"session_id" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": err.Error()})
 		return
 	}
 	sessionID := req.SessionID
@@ -362,8 +363,28 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// 	c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 	// 	return
 	// }
-	//防止重放攻击，需要先revoke当前的refreshtoken
-	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, sessionID)
+	session, err := h.accountService.SessionService.GetSessionBySessionID(c.Request.Context(), sessionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if session == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't find session by session_id"})
+		return
+	}
+	client, err := h.clientService.GetClientByID(c.Request.Context(), session.ClientID)
+	if err != nil || client == nil || client.IsActive == false {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized client"})
+		return
+	}
+	//从上下文获取一个clientid，防止当前的client与session的不一致
+	clientID, ok := middleware.GetClientID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	//防止重放攻击，需要先revoke当前的refreshtoken, 传进去clientid，防止别的client来验证
+	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, sessionID, clientID)
 	if err != nil {
 		// refresh token 不存在/已撤销/并发竞争失败都归为 401，不是服务端错误
 		if errors.Is(err, service.ErrRefreshTokenInvalid) {
@@ -394,8 +415,29 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	user, err := h.userService.GetUserByID(c.Request.Context(), accessToken.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't find user by ids"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": newRefreshTokenString, "expires_in": 3600})
+	response := gin.H{"access_token": accessTokenString, "refresh_token": newRefreshTokenString, "token_type": "Bearer", "expires_in": 3600}
+	//在clientID不为空的情况下，才会签发idtoken，clientID为空说明是admin登录的场景，admin登录不需要idtoken
+	if session.ClientID != "" && containsScope(session.Scopes, "openid") {
+		//刷新的场景idtoken的nonce为空，刷新token不需要nonce
+		idToken, err := h.idtokenIssuer.SignIDToken(user, session.ClientID, session.Scopes, "", session.CreatedAt)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		response["id_token"] = idToken
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // POST /auth/revoke

@@ -61,6 +61,7 @@ type AuthService struct {
 	refreshTokenRepo repository.RefreshTokenRepository
 	clientRepo       repository.ClientRepository
 	secret           string
+	signKey          *SigningKey
 }
 
 type AccessTokenClaims struct {
@@ -97,7 +98,10 @@ func (service *AuthService) SignAccessToken(accessToken *repository.AccessToken)
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(service.secret))
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = service.signKey.KeyID
+
+	return token.SignedString(service.signKey.PrivateKey)
 }
 
 func (service *AuthService) SignRefreshToken(refreshToken *repository.RefreshToken) (string, error) {
@@ -108,12 +112,13 @@ func (service *AuthService) SignRefreshToken(refreshToken *repository.RefreshTok
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(RefreshTokenValidPeriod)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    service.signKey.Issuer,
 		},
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(service.secret))
 }
 
-func NewAuthService(userRepo repository.UserRepository, sessionService *SessionService, authTokenRepo repository.AuthTokenRepository, accessTokenRepo repository.AccessTokenRepository, refreshTokenRepo repository.RefreshTokenRepository, clientRepo repository.ClientRepository, secret string) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, sessionService *SessionService, authTokenRepo repository.AuthTokenRepository, accessTokenRepo repository.AccessTokenRepository, refreshTokenRepo repository.RefreshTokenRepository, clientRepo repository.ClientRepository, secret string, signKey *SigningKey) *AuthService {
 	return &AuthService{
 		userRepo:         userRepo,
 		sessionService:   sessionService,
@@ -121,7 +126,8 @@ func NewAuthService(userRepo repository.UserRepository, sessionService *SessionS
 		accessTokenRepo:  accessTokenRepo,
 		refreshTokenRepo: refreshTokenRepo,
 		clientRepo:       clientRepo,
-		secret:           secret,
+		secret:           secret, //仍用于 refresh token + authorize cookie
+		signKey:          signKey,
 	}
 }
 
@@ -210,13 +216,13 @@ func (service *AuthService) ExchangeAuthToken(ctx context.Context, authTokenID s
 	if err := accessToken.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("Invalid access token data: %w ", err)
 	}
+	if err := service.authTokenRepo.RevokeToken(ctx, authTokenID); err != nil {
+		return nil, nil, fmt.Errorf("Failed to revoke access token: %w ", err)
+	}
 	if err := service.accessTokenRepo.CreateToken(ctx, accessToken); err != nil {
 		return nil, nil, fmt.Errorf("Failed to create access token: %w ", err)
 	}
 
-	if err := service.authTokenRepo.RevokeToken(ctx, authTokenID); err != nil {
-		return nil, nil, fmt.Errorf("Failed to revoke access token: %w ", err)
-	}
 	return accessToken, authToken, nil
 }
 
@@ -225,15 +231,20 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 	// ↑ Header                            ↑ Payload (claims)                  ↑ Signature
 	// 使用·jwt库解析和验证Token 第三个参数是给一个回调方法去验签,token是使用accessToken解析出的信息去构成的
 	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		//判断是不是对称SHA256加密算法
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+		//判断是不是非对称RSA256加密算法
+		keyID := token.Header["kid"]
+		if keyID != service.signKey.KeyID {
+			return nil, fmt.Errorf("invalid key id")
+		}
+		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, fmt.Errorf("unexpected alg: %v", token.Method.Alg())
 		}
-		return []byte(service.secret), nil
+		return service.signKey.PublicKey(), nil //需要返回公钥去验证签名
 	})
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("Invalid token: %w ", err)
 	}
+
 	if claims, ok := token.Claims.(*AccessTokenClaims); ok {
 		saved_token, err := service.accessTokenRepo.GetTokenByID(ctx, claims.AccessTokenID)
 		if err != nil || saved_token == nil || saved_token.TTL <= time.Now().Unix() || saved_token.Revoked || saved_token.UserID != claims.UserID {
@@ -244,7 +255,7 @@ func (service *AuthService) ValidateAccessToken(ctx context.Context, accessToken
 	return nil, fmt.Errorf("Failed to valid token: %w ", err)
 }
 
-func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string, sessionID string) (*repository.AccessToken, error) {
+func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string, sessionID string, clientID string) (*repository.AccessToken, error) {
 	accessToken := &repository.AccessToken{}
 
 	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
@@ -261,6 +272,7 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 	if !ok {
 		return nil, fmt.Errorf("Invalid refresh token claims")
 	}
+
 	refreshTokenRecord, err := service.refreshTokenRepo.GetTokenByID(ctx, claims.RefreshTokenID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get refresh token: %w ", err)
@@ -276,7 +288,7 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 	if err != nil || session == nil {
 		return nil, ErrRefreshTokenInvalid
 	}
-	if session.SessionID != sessionID || session.UserID != claims.UserID || session.RefreshTokenID != claims.RefreshTokenID || session.ExpiredAt <= time.Now().Unix() || session.Revoked {
+	if session.SessionID != sessionID || session.UserID != claims.UserID || session.RefreshTokenID != claims.RefreshTokenID || session.ClientID != clientID || session.ExpiredAt <= time.Now().Unix() || session.Revoked {
 		return nil, ErrRefreshTokenInvalid
 	}
 	if err := service.refreshTokenRepo.RevokeToken(ctx, claims.RefreshTokenID); err != nil {
@@ -302,10 +314,13 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken string) error {
 
 	token, err := jwt.ParseWithClaims(accessToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, fmt.Errorf("unexpected alg: %v", token.Method.Alg())
 		}
-		return []byte(service.secret), nil
+		if token.Header["kid"] != service.signKey.KeyID {
+			return nil, fmt.Errorf("invalid key id")
+		}
+		return service.signKey.PublicKey(), nil
 	})
 	if err != nil || !token.Valid {
 		return fmt.Errorf("Invalid token: %w ", err)
@@ -316,7 +331,7 @@ func (service *AuthService) RevokeAccessToken(ctx context.Context, accessToken s
 	return fmt.Errorf("Failed to revoke token: %w ", err)
 }
 
-func (service *AuthService) Login(ctx context.Context, loginID string, password string) (*repository.Session, error) {
+func (service *AuthService) Login(ctx context.Context, loginID string, password string, clientID string, scopes []string) (*repository.Session, error) {
 	user, err := service.userRepo.GetUserByEmail(ctx, loginID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get user by email: %w ", err)
@@ -333,7 +348,7 @@ func (service *AuthService) Login(ctx context.Context, loginID string, password 
 	if !VerifyPassword(password, user.HashedPassword) {
 		return nil, fmt.Errorf("Invalid password for user with email %s", loginID)
 	}
-	session, err := service.sessionService.CreateSession(ctx, user.UserID)
+	session, err := service.sessionService.CreateSession(ctx, user.UserID, clientID, scopes)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create session: %w ", err)
 	}
@@ -367,7 +382,7 @@ func (service *AuthService) AdminLogin(ctx context.Context, loginID string, pass
 		return nil, nil, "", ErrNotAdmin
 	}
 
-	session, err := service.sessionService.CreateSession(ctx, user.UserID)
+	session, err := service.sessionService.CreateSession(ctx, user.UserID, "", nil)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("Failed to create session: %w ", err)
 	}

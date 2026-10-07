@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"gin-demo/internal/user/service"
 	"strings"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -45,17 +46,17 @@ func ClientMiddleware(ClientService *service.ClientService) gin.HandlerFunc {
 
 		client, err := ClientService.GetClientByID(c.Request.Context(), client_id)
 
-		if err != nil || client == nil {
+		if err != nil || client == nil || client.IsActive == false {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid client_id"})
 			return
 		}
-
+		//验证client的密钥
 		if !service.VerifyPassword(client_secret, client.ClientSecretHash) {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Invalid or expired secret"})
 			return
 		}
 		c.Set("client_id", client_id)
-		c.Set("client_secret", client_secret)
+		// c.Set("client_secret", client_secret)
 		c.Next()
 	}
 }

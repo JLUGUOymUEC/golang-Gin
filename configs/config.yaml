@@ -4,5 +4,7 @@ Gateway:
     "admin_12302183" # 后续需要加一个方法，可以设置admin需要设置成 550e8400-e29b-41d4-a716-446655440000 在 user_model里生成的
   ]
   Issuer: http://localhost:8080 #标识是由哪个IdP签发的
-  IDTokenPrivateKeyPath: ./configs/private_key.pem #私钥路径，后续需要加一个方法，可以设置私钥路径
-  IDTokenKeyID: my-key-id # kid字段 用于定位公钥 可以从discovery document中获取
+  IDTokenPrivateKeyPath: ./configs/id_token_key.pem #私钥路径，后续需要加一个方法，可以设置私钥路径
+  IDTokenKeyID: my-IdTokenKey-ID # kid字段 用于定位公钥 可以从discovery document中获取
+  AccessTokenPrivateKeyPath: ./configs/access_token_key.pem #私钥路径，后续需要加一个方法，可以设置私钥路径
+  AccessTokenKeyID: my-AccessTokenKey-ID # kid字段 用于定位公钥 可以从discovery document中获取

@@ -22,6 +22,10 @@ type Session struct {
 	AccessTokenID string `dynamodbav:"access_token_id"`
 
 	RefreshTokenID string `dynamodbav:"refresh_token_id"`
+
+	ClientID string `dynamodbav:"client_id"`
+
+	Scopes []string `dynamodbav:"scopes"`
 }
 
 func (s *Session) Validate() error {
