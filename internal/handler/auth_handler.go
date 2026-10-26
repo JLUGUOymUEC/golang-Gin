@@ -239,9 +239,9 @@ func scopesAllowed(requestedScopes, allowedScopes []string) bool {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// 必须大写，大写才会被解析
 	var req struct {
-		SessionID string `json:"session_id" binding:"required"`
+		SessionID string `json:"session_id" form:"session_id" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -272,13 +272,13 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 // POST /auth/token
-// 规定需要可以接收json和form两种格式的请求体，json是移动端，form是web端
+// 规定需要可以接收json和form两种格式的请求体，json是移动端，form是web端 shouldbind会根据不同的格式自适应
 func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	var req struct {
-		GrantType    string `json:"grant_type" binding:"required"`
-		ClientID     string `json:"client_id" binding:"required"`
-		AuthTokenID  string `json:"code" binding:"required"`
-		RedirectURI  string `json:"redirect_uri" binding:"required"`
+		GrantType    string `json:"grant_type" form:"grant_type" binding:"required"`
+		ClientID     string `json:"client_id" form:"client_id"  binding:"required"`
+		AuthTokenID  string `json:"code" form:"code" binding:"required"`
+		RedirectURI  string `json:"redirect_uri" form:"redi" binding:"required"`
 		CodeVerifier string `json:"code_verifier" `
 	}
 	if err := c.ShouldBind(&req); err != nil {
@@ -342,15 +342,15 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		return
 	}
 	//expires_in: 3600 代表 1 小时后过期,只描述access_token的有效期限
-	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "id_token": idToken, "session_id": authToken.SessionID, "expires_in": 3600})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessTokenString, "refresh_token": refreshTokenString, "id_token": idToken, "session_id": authToken.SessionID, "token_type": "Bearer", "expires_in": int(service.AccessTokenValidPeriod.Seconds())})
 }
 
 // POST /auth/refresh
 // 规定需要可以接收json和form两种格式的请求体，json是移动端，form是web端
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-		SessionID    string `json:"session_id" binding:"required"`
+		RefreshToken string `json:"refresh_token" form:"refresh_token" binding:"required"`
+		SessionID    string `json:"session_id" formn:"session_id" binding:"required"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": err.Error()})
@@ -443,8 +443,8 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // POST /auth/revoke
 func (h *AuthHandler) RevokeToken(c *gin.Context) {
 	var req struct {
-		AccessToken  string `json:"access_token" binding:"required"`
-		RefreshToken string `json:"refresh_token,omitempty"`
+		AccessToken  string `json:"access_token" form:"access_token" binding:"required"`
+		RefreshToken string `json:"refresh_token,omitempty" form:"refresh_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

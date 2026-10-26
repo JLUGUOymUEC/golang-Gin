@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +20,8 @@ type DynamoAuthTokenRepository struct {
 	client    *dynamodb.Client
 	tableName string
 }
+
+var ErrAuthTokenNotFound = errors.New("auth token not found")
 
 func NewDynamoAuthTokenRepository(ctx context.Context) (*DynamoAuthTokenRepository, error) {
 	client, err := NewDynamoDBConfig(ctx)
@@ -112,7 +115,7 @@ func (repo *DynamoAuthTokenRepository) RevokeToken(ctx context.Context, tokenID 
 		ConditionExpression: aws.String("attribute_exists(auth_token_id) AND revoked = :false"),
 	})
 	if err != nil {
-		return fmt.Errorf("Failed to revoke token: %w ", err)
+		return fmt.Errorf("Failed to revoke token: %w ", ErrAuthTokenNotFound)
 	}
 	return nil
 }

@@ -132,7 +132,7 @@ func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 	}
 	accountService := service.NewAccountService(userRepo, sessionService, authService)
 	authHandler := handler.NewAuthHandler(authService, accountService, userService, clientService, idTokenIssuer)
-	adminHandler := handler.NewAdminHandler(authService, sessionService)
+	adminHandler := handler.NewAdminHandler(authService)
 	clientHandler := handler.NewClientHandler(clientService)
 	userHandler := handler.NewUserHandler(userService)
 
