@@ -278,8 +278,8 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 		GrantType    string `json:"grant_type" form:"grant_type" binding:"required"`
 		ClientID     string `json:"client_id" form:"client_id"  binding:"required"`
 		AuthTokenID  string `json:"code" form:"code" binding:"required"`
-		RedirectURI  string `json:"redirect_uri" form:"redi" binding:"required"`
-		CodeVerifier string `json:"code_verifier" `
+		RedirectURI  string `json:"redirect_uri" form:"redirect_uri" binding:"required"`
+		CodeVerifier string `json:"code_verifier" form:"code_verifier" binding:"required"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": err.Error()})
@@ -350,7 +350,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token" form:"refresh_token" binding:"required"`
-		SessionID    string `json:"session_id" formn:"session_id" binding:"required"`
+		SessionID    string `json:"session_id" form:"session_id" binding:"required"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": err.Error()})
@@ -372,17 +372,22 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can't find session by session_id"})
 		return
 	}
-	client, err := h.clientService.GetClientByID(c.Request.Context(), session.ClientID)
-	if err != nil || client == nil || client.IsActive == false {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized client"})
-		return
-	}
-	//从上下文获取一个clientid，防止当前的client与session的不一致
+
+	
 	clientID, ok := middleware.GetClientID(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
+	//从上下文获取一个clientid，防止当前的client与session的不一致,没有clientID就走admin的
+	if session.ClientID != ""{ //如果session的clientid不为空，说明是client登录的场景,为空说明是管理员登录。管理员登录不走clientmiddlewware，所以一直为空
+		if !ok || session.ClientID != clientID {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		client, err := h.clientService.GetClientByID(c.Request.Context(), session.ClientID)
+		if err != nil || client == nil || client.IsActive == false {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized client"})
+			return
+		}
 	}
+
 	//防止重放攻击，需要先revoke当前的refreshtoken, 传进去clientid，防止别的client来验证
 	accessToken, err := h.authService.RefreshAccessToken(c.Request.Context(), req.RefreshToken, sessionID, clientID)
 	if err != nil {
@@ -446,7 +451,7 @@ func (h *AuthHandler) RevokeToken(c *gin.Context) {
 		AccessToken  string `json:"access_token" form:"access_token" binding:"required"`
 		RefreshToken string `json:"refresh_token,omitempty" form:"refresh_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

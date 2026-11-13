@@ -11,6 +11,7 @@ import (
 type OIDCHandler struct {
 	issuer        string              //  discovery 用
 	idTokenIssuer *service.SigningKey // jwks 用
+	accessTokenIssuer *service.SigningKey // jwks 用
 }
 
 type jwk struct {
@@ -26,29 +27,39 @@ type jwksResponse struct {
 	Keys []jwk `json:"keys"`
 }
 
-func NewOIDCHandler(issuer string, idTokenIssuer *service.SigningKey) *OIDCHandler {
+func NewOIDCHandler(issuer string, idTokenIssuer *service.SigningKey, accessTokenIssuer *service.SigningKey) *OIDCHandler {
 	return &OIDCHandler{
 		issuer:        issuer,
 		idTokenIssuer: idTokenIssuer,
+		accessTokenIssuer: accessTokenIssuer,
 	}
 }
 
 // 目的是把公钥暴露给SP
-func buildJWKS(key *service.SigningKey) jwksResponse {
-	publicKey := key.PublicKey()
+func buildJWKS(idTokenkey *service.SigningKey, accessTokenKey *service.SigningKey) jwksResponse {
+	idToken_publicKey := idTokenkey.PublicKey()
+	accessToken_publicKey := accessTokenKey.PublicKey()
 	// 签名：sig = padded_hash ^ d  mod n d是私钥指数
 	// padded_hash = sig ^ e  mod n      sig是签名
-	return jwksResponse{
-		Keys: []jwk{{
+	idtoken_jwk := jwk{
 			Kty: "RSA",                                                                        //加密方式 key type
 			Use: "sig",                                                                        //用途 sig是验签 enc是加密
 			Alg: "RS256",                                                                      //intended algorithm
-			Kid: key.KeyID,                                                                    //标记密钥位置
-			N:   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),                    //公钥模数
-			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()), //公钥指数
-		},
-		},
+			Kid: idTokenkey.KeyID,                                                                    //标记密钥位置
+			N:   base64.RawURLEncoding.EncodeToString(idToken_publicKey.N.Bytes()),                    //公钥模数
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(idToken_publicKey.E)).Bytes()), //公钥指数
 	}
+	accessToken_jwk := jwk{
+			Kty: "RSA",                                                                        //加密方式 key type
+			Use: "sig",                                                                        //用途 sig是验签 enc是加密
+			Alg: "RS256",                                                                      //intended algorithm
+			Kid: accessTokenKey.KeyID,                                                                    //标记密钥位置
+			N:   base64.RawURLEncoding.EncodeToString(accessToken_publicKey.N.Bytes()),                    //公钥模数
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(accessToken_publicKey.E)).Bytes()), //公钥指数
+	}
+	return jwksResponse{
+			Keys: []jwk{idtoken_jwk, accessToken_jwk},	
+		}
 }
 
 func (h *OIDCHandler) Discovery(c *gin.Context) {
@@ -68,5 +79,5 @@ func (h *OIDCHandler) Discovery(c *gin.Context) {
 
 func (h *OIDCHandler) JWKS(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=3600") //可以缓存，但是设置上限时间，防止密钥轮换后，客户端还在用旧的缓存
-	c.JSON(200, buildJWKS(h.idTokenIssuer))
+	c.JSON(200, buildJWKS(h.idTokenIssuer, h.accessTokenIssuer))
 }

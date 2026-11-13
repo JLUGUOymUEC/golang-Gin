@@ -136,7 +136,7 @@ func buildDependecies(context context.Context) (*dependencies, *Config, error) {
 	clientHandler := handler.NewClientHandler(clientService)
 	userHandler := handler.NewUserHandler(userService)
 
-	oidcHandler := handler.NewOIDCHandler(config.Gateway.Issuer, idTokenIssuer)
+	oidcHandler := handler.NewOIDCHandler(config.Gateway.Issuer, idTokenIssuer, accessTokenIssuer)
 	return &dependencies{
 		authService:   authService,
 		authHandler:   authHandler,
@@ -175,7 +175,7 @@ func buildRouter(deps *dependencies, config *Config) *gin.Engine {
 	})
 
 	routes.RegisterClientRoutes(router, deps.clientHandler)
-	routes.RegisterAdminRoutes(router, deps.adminHandler, deps.clientHandler, deps.authService, deps.userService, config.Gateway.AdminUserIDs)
+	routes.RegisterAdminRoutes(router, deps.adminHandler, deps.clientHandler, deps.authHandler, deps.authService, deps.userService, config.Gateway.AdminUserIDs)
 	routes.RegisterAuthRoutes(router, deps.authHandler, deps.authService, deps.clientService)
 	routes.RegisterOIDCRoutes(router, deps.oidcHandler)
 	return router

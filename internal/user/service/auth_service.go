@@ -288,7 +288,11 @@ func (service *AuthService) RefreshAccessToken(ctx context.Context, refreshToken
 	if err != nil || session == nil {
 		return nil, ErrRefreshTokenInvalid
 	}
-	if session.SessionID != sessionID || session.UserID != claims.UserID || session.RefreshTokenID != claims.RefreshTokenID || session.ClientID != clientID || session.ExpiredAt <= time.Now().Unix() || session.Revoked {
+	// 管理员没有clientid就不查了, clientID是middleware来的，管理员进来肯定是空的，别的地方签发的可能也能钻空子，所以从session中获取
+	if session.ClientID != "" && session.ClientID != clientID {
+		return nil, ErrRefreshTokenInvalid
+	}
+	if session.SessionID != sessionID || session.UserID != claims.UserID || session.RefreshTokenID != claims.RefreshTokenID || session.ExpiredAt <= time.Now().Unix() || session.Revoked {
 		return nil, ErrRefreshTokenInvalid
 	}
 	if err := service.refreshTokenRepo.RevokeToken(ctx, claims.RefreshTokenID); err != nil {

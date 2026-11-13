@@ -24,6 +24,7 @@ func RegisterAdminRoutes(
 	router *gin.Engine,
 	adminHandler *handler.AdminHandler,
 	clientHandler *handler.ClientHandler,
+	authHandler *handler.AuthHandler,
 	authService *service.AuthService,
 	userService *service.UserService,
 	adminUserIDs []string,
@@ -31,13 +32,15 @@ func RegisterAdminRoutes(
 	// 公开：管理员登录。这是密码接口，必须靠限流挡住爆破，
 	// 目前依赖 router 级别的 RateLimitMiddleware。
 	router.POST("/admin/login", adminHandler.Login)
-
+	router.POST("/admin/refresh", authHandler.RefreshToken)
 	admin := router.Group("/admin")
+	
 	admin.Use(middleware.AuthMiddleware(authService))
 	admin.Use(middleware.AdminMiddleware(userService, adminUserIDs))
 	{
 		admin.POST("/clients", clientHandler.CreateClient)
 		admin.GET("/clients", clientHandler.ListClients)
 		admin.DELETE("/clients/:clientID", clientHandler.DeactivateClient)
+		
 	}
 }
