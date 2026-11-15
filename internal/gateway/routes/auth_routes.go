@@ -22,6 +22,7 @@ func RegisterAuthRoutes(
 	{
 		clientAuth.POST("/token", authHandler.ExchangeToken)
 		clientAuth.POST("/refresh", authHandler.RefreshToken)
+
 	}
 
 	// ---- 公开路由：不需要 JWT ----
@@ -29,6 +30,7 @@ func RegisterAuthRoutes(
 		auth.POST("/register", authHandler.Register)
 		auth.GET("/authorize", authHandler.Authorize)
 		auth.POST("/login", authHandler.Login)
+		auth.GET("/userinfo", authHandler.UserInfo)
 	}
 
 	// ---- 受保护路由：需要 JWT ----

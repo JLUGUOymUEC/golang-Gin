@@ -9,8 +9,8 @@ import (
 )
 
 type OIDCHandler struct {
-	issuer        string              //  discovery 用
-	idTokenIssuer *service.SigningKey // jwks 用
+	issuer            string              //  discovery 用
+	idTokenIssuer     *service.SigningKey // jwks 用
 	accessTokenIssuer *service.SigningKey // jwks 用
 }
 
@@ -29,8 +29,8 @@ type jwksResponse struct {
 
 func NewOIDCHandler(issuer string, idTokenIssuer *service.SigningKey, accessTokenIssuer *service.SigningKey) *OIDCHandler {
 	return &OIDCHandler{
-		issuer:        issuer,
-		idTokenIssuer: idTokenIssuer,
+		issuer:            issuer,
+		idTokenIssuer:     idTokenIssuer,
 		accessTokenIssuer: accessTokenIssuer,
 	}
 }
@@ -42,24 +42,24 @@ func buildJWKS(idTokenkey *service.SigningKey, accessTokenKey *service.SigningKe
 	// 签名：sig = padded_hash ^ d  mod n d是私钥指数
 	// padded_hash = sig ^ e  mod n      sig是签名
 	idtoken_jwk := jwk{
-			Kty: "RSA",                                                                        //加密方式 key type
-			Use: "sig",                                                                        //用途 sig是验签 enc是加密
-			Alg: "RS256",                                                                      //intended algorithm
-			Kid: idTokenkey.KeyID,                                                                    //标记密钥位置
-			N:   base64.RawURLEncoding.EncodeToString(idToken_publicKey.N.Bytes()),                    //公钥模数
-			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(idToken_publicKey.E)).Bytes()), //公钥指数
+		Kty: "RSA",                                                                                //加密方式 key type
+		Use: "sig",                                                                                //用途 sig是验签 enc是加密
+		Alg: "RS256",                                                                              //intended algorithm
+		Kid: idTokenkey.KeyID,                                                                     //标记密钥位置
+		N:   base64.RawURLEncoding.EncodeToString(idToken_publicKey.N.Bytes()),                    //公钥模数
+		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(idToken_publicKey.E)).Bytes()), //公钥指数
 	}
 	accessToken_jwk := jwk{
-			Kty: "RSA",                                                                        //加密方式 key type
-			Use: "sig",                                                                        //用途 sig是验签 enc是加密
-			Alg: "RS256",                                                                      //intended algorithm
-			Kid: accessTokenKey.KeyID,                                                                    //标记密钥位置
-			N:   base64.RawURLEncoding.EncodeToString(accessToken_publicKey.N.Bytes()),                    //公钥模数
-			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(accessToken_publicKey.E)).Bytes()), //公钥指数
+		Kty: "RSA",                                                                                    //加密方式 key type
+		Use: "sig",                                                                                    //用途 sig是验签 enc是加密
+		Alg: "RS256",                                                                                  //intended algorithm
+		Kid: accessTokenKey.KeyID,                                                                     //标记密钥位置
+		N:   base64.RawURLEncoding.EncodeToString(accessToken_publicKey.N.Bytes()),                    //公钥模数
+		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(accessToken_publicKey.E)).Bytes()), //公钥指数
 	}
 	return jwksResponse{
-			Keys: []jwk{idtoken_jwk, accessToken_jwk},	
-		}
+		Keys: []jwk{idtoken_jwk, accessToken_jwk},
+	}
 }
 
 func (h *OIDCHandler) Discovery(c *gin.Context) {
@@ -73,7 +73,7 @@ func (h *OIDCHandler) Discovery(c *gin.Context) {
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 		"token_endpoint":                        h.issuer + "/auth/token",
 		"code_challenge_methods_supported":      []string{"S256", "plain"},
-		// "userinfo_endpoint":                     h.issuer + "/api/v1/user/me",
+		"userinfo_endpoint":                     h.issuer + "/userinfo",
 	})
 }
 

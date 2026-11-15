@@ -25,6 +25,14 @@ type AuthHandler struct {
 	idtokenIssuer  *service.SigningKey
 }
 
+type UserInfoResponse struct {
+	UserID    string `json:"user_id"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
 const authorizationRequestCookie = "oidc_authorization_request"
 
 type authorizationRequestClaims struct {
@@ -373,10 +381,9 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	
 	clientID, ok := middleware.GetClientID(c)
 	//从上下文获取一个clientid，防止当前的client与session的不一致,没有clientID就走admin的
-	if session.ClientID != ""{ //如果session的clientid不为空，说明是client登录的场景,为空说明是管理员登录。管理员登录不走clientmiddlewware，所以一直为空
+	if session.ClientID != "" { //如果session的clientid不为空，说明是client登录的场景,为空说明是管理员登录。管理员登录不走clientmiddlewware，所以一直为空
 		if !ok || session.ClientID != clientID {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
@@ -585,6 +592,29 @@ func (h *AuthHandler) VerifyPasswordFormat(password string) bool {
 	hasSpecial := regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]`).MatchString(password)
 
 	return hasLower && hasUpper && hasDigit && hasSpecial
+}
+
+// Get /auth/userinfo
+func (h *AuthHandler) UserInfo(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	user, err := h.userService.GetUserByID(c.Request.Context(), userID)
+
+	if user == nil || err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Can't find user"})
+		return
+	}
+	userInfo := UserInfoResponse{
+		UserID:    user.UserID,
+		Username:  user.Username,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+	}
+	c.JSON(http.StatusOK, gin.H{"userInfo": userInfo})
 }
 
 // POST /auth/change_password

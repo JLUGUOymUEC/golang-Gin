@@ -96,6 +96,8 @@ func (service *AuthService) SignAccessToken(accessToken *repository.AccessToken)
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(AccessTokenValidPeriod)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    service.signKey.Issuer,
+			Audience:  jwt.ClaimStrings{service.signKey.Issuer},
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
